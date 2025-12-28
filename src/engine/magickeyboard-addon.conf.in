@@ -1,9 +1,9 @@
 [Addon]
 Name=magickeyboard
 Category=InputMethod
-Library=magickeyboard
+Library=libmagickeyboard
 Type=SharedLibrary
-OnDemand=True
+OnDemand=False
 Version=@PROJECT_VERSION@
 
 [Addon/Dependencies]

@@ -1,108 +1,158 @@
 /**
- * Magic Keyboard UI - Main Entry Point
- * 
- * Creates a non-focusable keyboard window that:
- * - Never steals focus from target application
- * - Stays on top of other windows
- * - Communicates with engine via Unix socket
+ * Magic Keyboard UI - v0.1
+ * Non-focusable Qt6/QML keyboard with socket IPC
  */
 
+#include <QDebug>
 #include <QGuiApplication>
+#include <QLocalSocket>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
 #include <QQuickWindow>
 #include <QScreen>
-#include <QLocalSocket>
+#include <QTimer>
 
 #include "protocol.h"
 
-#include <QDebug>
+class KeyboardBridge : public QObject {
+  Q_OBJECT
+  Q_PROPERTY(bool visible READ isVisible WRITE setVisible NOTIFY visibleChanged)
 
-/**
- * Apply window flags to prevent focus stealing.
- * 
- * CRITICAL: These flags ensure the keyboard never becomes the active window
- * and focus stays with the application the user is typing into.
- */
-void applyWindowFlags(QQuickWindow* window) {
-    if (!window) return;
-    
-    window->setFlags(
-        Qt::Tool |                          // Utility window (not in taskbar)
-        Qt::FramelessWindowHint |           // No window decorations
-        Qt::WindowStaysOnTopHint |          // Always on top
-        Qt::WindowDoesNotAcceptFocus        // NEVER take focus
-    );
-    
-    // Additional hint for window managers
-    window->setProperty("_q_showWithoutActivating", true);
-    
-    qDebug() << "Applied non-focusable window flags";
-}
+public:
+  explicit KeyboardBridge(QObject *parent = nullptr) : QObject(parent) {
+    socket_ = new QLocalSocket(this);
 
-/**
- * Position keyboard at bottom center of primary screen.
- */
-void positionKeyboard(QQuickWindow* window) {
-    if (!window) return;
-    
-    QScreen* screen = QGuiApplication::primaryScreen();
-    if (!screen) return;
-    
-    QRect available = screen->availableGeometry();
-    
-    // Keyboard dimensions (will be set by QML, use defaults here)
-    int kbWidth = 800;
-    int kbHeight = 280;
-    
-    int x = (available.width() - kbWidth) / 2;
-    int y = available.height() - kbHeight - 20;  // 20px margin from bottom
-    
-    window->setGeometry(x, y, kbWidth, kbHeight);
-    
-    qDebug() << "Positioned keyboard at:" << x << y;
-}
+    connect(socket_, &QLocalSocket::connected, this,
+            [this]() { qDebug() << "Connected to engine"; });
 
-int main(int argc, char* argv[]) {
-    // Set application attributes before creating QGuiApplication
-    QGuiApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
-    
-    QGuiApplication app(argc, argv);
-    app.setApplicationName("Magic Keyboard");
-    app.setApplicationVersion("0.1.0");
-    app.setOrganizationName("MagicKeyboard");
-    
-    qDebug() << "Magic Keyboard UI starting...";
-    qDebug() << "Socket path:" << QString::fromStdString(magickeyboard::ipc::getSocketPath());
-    
-    // Create QML engine
-    QQmlApplicationEngine engine;
-    
-    // Load main QML file
-    const QUrl url(QStringLiteral("qrc:/MagicKeyboard/KeyboardWindow.qml"));
-    
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
-                     &app, [url](QObject* obj, const QUrl& objUrl) {
+    connect(socket_, &QLocalSocket::disconnected, this, [this]() {
+      qDebug() << "Disconnected, retrying...";
+      QTimer::singleShot(1000, this, &KeyboardBridge::connectToEngine);
+    });
+
+    connect(socket_, &QLocalSocket::readyRead, this,
+            &KeyboardBridge::onReadyRead);
+
+    connect(socket_, &QLocalSocket::errorOccurred, this, [this]() {
+      qDebug() << "Socket error:" << socket_->errorString();
+      QTimer::singleShot(1000, this, &KeyboardBridge::connectToEngine);
+    });
+  }
+
+  bool isVisible() const { return visible_; }
+  void setVisible(bool v) {
+    if (visible_ != v) {
+      visible_ = v;
+      emit visibleChanged();
+    }
+  }
+
+public slots:
+  void connectToEngine() {
+    QString path = QString::fromStdString(magickeyboard::ipc::getSocketPath());
+    qDebug() << "Connecting to:" << path;
+    socket_->connectToServer(path);
+  }
+
+  void sendKey(const QString &key) {
+    QString msg = QString("{\"type\":\"key\",\"text\":\"%1\"}\n").arg(key);
+    socket_->write(msg.toUtf8());
+    socket_->flush();
+    qDebug() << "Sent:" << key;
+  }
+
+signals:
+  void visibleChanged();
+  void showKeyboard();
+  void hideKeyboard();
+
+private slots:
+  void onReadyRead() {
+    buffer_ += socket_->readAll();
+
+    int idx;
+    while ((idx = buffer_.indexOf('\n')) >= 0) {
+      QByteArray line = buffer_.left(idx);
+      buffer_.remove(0, idx + 1);
+
+      QString msg = QString::fromUtf8(line);
+      qDebug() << "Received:" << msg;
+
+      if (msg.contains("\"type\":\"show\"")) {
+        setVisible(true);
+        emit showKeyboard();
+      } else if (msg.contains("\"type\":\"hide\"")) {
+        setVisible(false);
+        emit hideKeyboard();
+      }
+    }
+  }
+
+private:
+  QLocalSocket *socket_;
+  QByteArray buffer_;
+  bool visible_ = false;
+};
+
+int main(int argc, char *argv[]) {
+  QGuiApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+  QGuiApplication app(argc, argv);
+  app.setApplicationName("Magic Keyboard");
+
+  qDebug() << "Magic Keyboard UI starting";
+  qDebug() << "Socket:"
+           << QString::fromStdString(magickeyboard::ipc::getSocketPath());
+
+  KeyboardBridge bridge;
+
+  QQmlApplicationEngine engine;
+  engine.rootContext()->setContextProperty("bridge", &bridge);
+
+  const QUrl url(QStringLiteral("qrc:/MagicKeyboard/KeyboardWindow.qml"));
+
+  QObject::connect(
+      &engine, &QQmlApplicationEngine::objectCreated, &app,
+      [&bridge, url](QObject *obj, const QUrl &objUrl) {
         if (!obj && url == objUrl) {
-            qCritical() << "Failed to load KeyboardWindow.qml";
-            QCoreApplication::exit(-1);
-            return;
+          qCritical() << "Failed to load QML";
+          QCoreApplication::exit(-1);
+          return;
         }
-        
-        // Get the window and apply our flags
-        QQuickWindow* window = qobject_cast<QQuickWindow*>(obj);
+
+        auto *window = qobject_cast<QQuickWindow *>(obj);
         if (window) {
-            applyWindowFlags(window);
-            positionKeyboard(window);
-            
-            qDebug() << "Keyboard window created successfully";
+          // CRITICAL: Never steal focus
+          window->setFlags(Qt::Tool | Qt::FramelessWindowHint |
+                           Qt::WindowStaysOnTopHint |
+                           Qt::WindowDoesNotAcceptFocus);
+
+          // Position at bottom center
+          QScreen *screen = QGuiApplication::primaryScreen();
+          if (screen) {
+            QRect r = screen->availableGeometry();
+            int w = window->width();
+            int h = window->height();
+            window->setPosition((r.width() - w) / 2, r.height() - h - 20);
+          }
+
+          // Connect visibility
+          QObject::connect(&bridge, &KeyboardBridge::showKeyboard, window,
+                           [window]() { window->show(); });
+          QObject::connect(&bridge, &KeyboardBridge::hideKeyboard, window,
+                           [window]() { window->hide(); });
+
+          // Start hidden, connect to engine
+          window->hide();
+          bridge.connectToEngine();
+
+          qDebug() << "Window ready, hidden until activation";
         }
-    }, Qt::QueuedConnection);
-    
-    engine.load(url);
-    
-    // TODO: Connect to engine socket
-    // QLocalSocket socket;
-    // socket.connectToServer(QString::fromStdString(magickeyboard::ipc::getSocketPath()));
-    
-    return app.exec();
+      },
+      Qt::QueuedConnection);
+
+  engine.load(url);
+
+  return app.exec();
 }
+
+#include "main.moc"

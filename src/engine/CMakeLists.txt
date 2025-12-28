@@ -16,9 +16,9 @@ target_include_directories(magickeyboard-engine
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# Set output name without 'lib' prefix
+# Set output name WITH 'lib' prefix (Fcitx5 convention)
 set_target_properties(magickeyboard-engine PROPERTIES
-    PREFIX ""
+    PREFIX "lib"
     OUTPUT_NAME "magickeyboard"
 )
 
@@ -31,7 +31,7 @@ configure_file(
 
 configure_file(
     magickeyboard-addon.conf.in
-    ${CMAKE_CURRENT_BINARY_DIR}/magickeyboard-addon.conf
+    ${CMAKE_CURRENT_BINARY_DIR}/addon-magickeyboard.conf
     @ONLY
 )
 
@@ -46,6 +46,7 @@ install(FILES
 )
 
 install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/magickeyboard-addon.conf
+    ${CMAKE_CURRENT_BINARY_DIR}/addon-magickeyboard.conf
     DESTINATION ${FCITX5_ADDON_INSTALL_DIR}/addon
+    RENAME magickeyboard.conf
 )

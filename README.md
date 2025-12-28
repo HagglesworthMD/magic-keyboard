@@ -30,16 +30,16 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full technical details.
 
 ```bash
 # Core build tools
-sudo apt install build-essential cmake ninja-build
+sudo apt install build-essential cmake ninja-build pkg-config
 
 # Fcitx5 development
-sudo apt install fcitx5 libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev
+sudo apt install fcitx5 fcitx5-config-qt libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev
 
-# Qt6 development
-sudo apt install qt6-base-dev qt6-declarative-dev qml6-module-qtquick
-
-# Optional: for testing
-sudo apt install fcitx5-frontend-qt6 fcitx5-frontend-gtk4
+# Qt6 development + QML runtime modules
+sudo apt install qt6-base-dev qt6-declarative-dev \
+    qml6-module-qtquick qml6-module-qtquick-controls \
+    qml6-module-qtquick-layouts qml6-module-qtquick-window \
+    qml6-module-qtqml-workerscript libxkbcommon-dev
 ```
 
 ### SteamOS / Arch Linux (Target)
@@ -65,16 +65,59 @@ cmake --build build
 cmake --install build --prefix ~/.local
 ```
 
-## Running
+## Testing (Development)
 
-1. Ensure Fcitx5 is running:
-   ```bash
-   fcitx5 -d
-   ```
+### 1. Install the addon
 
-2. Add Magic Keyboard as an input method via `fcitx5-configtool`
+After building, install the Fcitx5 addon to system paths:
 
-3. The keyboard UI will auto-launch when you focus a text field
+```bash
+# Install the addon library
+sudo cp build/lib/libmagickeyboard.so /usr/lib/x86_64-linux-gnu/fcitx5/
+
+# Install the addon config (note: must be named magickeyboard.conf)
+sudo cp build/src/engine/addon-magickeyboard.conf /usr/share/fcitx5/addon/magickeyboard.conf
+```
+
+### 2. Restart Fcitx5 and verify addon loads
+
+```bash
+pkill fcitx5
+fcitx5 -d 2>&1 | grep -i magic
+```
+
+You should see:
+```
+Magic Keyboard engine initializing
+Socket server listening at: /run/user/1000/magic-keyboard.sock
+Loaded addon magickeyboard
+Found 1 input method(s) in addon magickeyboard
+```
+
+### 3. Run the UI manually
+
+```bash
+./build/bin/magickeyboard-ui
+```
+
+You should see:
+```
+Magic Keyboard UI starting
+Connected to engine
+Window ready, hidden until activation
+```
+
+### 4. Configure Fcitx5 to use Magic Keyboard
+
+Run `fcitx5-configtool` and add "Magic Keyboard" to your input method list.
+
+### 5. Test the full flow
+
+1. Open a text editor (Kate, gedit, etc.)
+2. Click into a text field
+3. The keyboard should appear
+4. Click keys → text should appear in the editor
+5. Click outside the text field → keyboard should hide
 
 ## Project Status
 
