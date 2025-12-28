@@ -121,72 +121,67 @@ void MagicKeyboardEngine::reset(const fcitx::InputMethodEntry &,
   }
 }
 
-// Check if Magic Keyboard is the active IM for this context
-bool MagicKeyboardEngine::isMagicKeyboardActive(fcitx::InputContext *ic) {
-  if (!ic)
-    return false;
-
-  // Method 1: Check via Instance (safest, checks per-context)
-  const auto *entry = instance_->inputMethodEntry(ic);
-  if (entry && entry->addon() == "magickeyboard") {
-    return true;
+// Check if this context should show the keyboard
+// Returns: 0=no, 1=yes, sets reason string
+int MagicKeyboardEngine::shouldShowKeyboard(fcitx::InputContext *ic,
+                                            std::string &reason) {
+  if (!ic) {
+    reason = "null-ic";
+    return 0;
   }
 
-  // Method 2: Fall back to global current IM name
-  std::string currentIM = instance_->currentInputMethod();
-  return (currentIM == "magic-keyboard");
-}
+  // Must be using Magic Keyboard (per-IC check is authoritative)
+  const auto *entry = instance_->inputMethodEntry(ic);
+  bool isOurs = (entry && entry->addon() == "magickeyboard");
 
-// Check if this context should show the keyboard
-bool MagicKeyboardEngine::shouldShowKeyboard(fcitx::InputContext *ic) {
-  if (!ic)
-    return false;
+  // Fallback only if entry is null
+  if (!entry) {
+    std::string globalIM = instance_->currentInputMethod();
+    isOurs = (globalIM == "magic-keyboard");
+  }
 
-  // Must be using Magic Keyboard
-  if (!isMagicKeyboardActive(ic)) {
-    MKLOG(Debug) << "FocusIn: not our IM, skip";
-    return false;
+  if (!isOurs) {
+    reason = "other-im";
+    return 0;
   }
 
   // Check capabilities - don't show for password fields
   auto caps = ic->capabilityFlags();
   if (caps.test(fcitx::CapabilityFlag::Password)) {
-    MKLOG(Debug) << "FocusIn: password field, skip";
-    return false;
+    reason = "password";
+    return 0;
   }
 
-  return true;
+  reason = "ok";
+  return 1;
 }
 
 void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
-  // All checks done inline, no pointer storage
-  std::string program = ic ? ic->program() : "unknown";
+  std::string program = ic ? ic->program() : "?";
+  std::string reason;
+  int show = shouldShowKeyboard(ic, reason);
 
-  if (shouldShowKeyboard(ic)) {
-    MKLOG(Info) << "FocusIn -> show (" << program << ")";
-    currentIC_ = ic; // Update current IC for commits
+  // Single-line operator log
+  MKLOG(Info) << "FocusIn: " << program << " show=" << show << " (" << reason
+              << ")";
+
+  if (show) {
+    currentIC_ = ic;
     ensureUIRunning();
     showKeyboard();
-  } else {
-    // Another app/field got focus but not using our IM
-    // Hide if we were visible
-    if (keyboardVisible_) {
-      MKLOG(Info) << "FocusIn (other IM) -> hide";
-      hideKeyboard();
-    }
+  } else if (keyboardVisible_) {
+    hideKeyboard();
   }
 }
 
 void MagicKeyboardEngine::handleFocusOut(fcitx::InputContext *ic) {
-  std::string program = ic ? ic->program() : "unknown";
+  std::string program = ic ? ic->program() : "?";
 
-  // Always hide on focus-out, no debate
   if (keyboardVisible_) {
-    MKLOG(Info) << "FocusOut -> hide (" << program << ")";
+    MKLOG(Info) << "FocusOut: " << program << " -> hide";
     hideKeyboard();
   }
 
-  // Clear current IC if it was the one that lost focus
   if (currentIC_ == ic) {
     currentIC_ = nullptr;
   }

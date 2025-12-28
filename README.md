@@ -107,17 +107,46 @@ Connected to engine
 Window ready, hidden until activation
 ```
 
-### 4. Configure Fcitx5 to use Magic Keyboard
+### 4. Install the UI binary and systemd service
+
+```bash
+# Install UI binary
+sudo cp build/bin/magickeyboard-ui /usr/local/bin/
+
+# Install user service (optional but recommended)
+mkdir -p ~/.config/systemd/user
+cp packaging/systemd/magickeyboard-ui.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable magickeyboard-ui
+```
+
+### 5. Configure Fcitx5 to use Magic Keyboard
 
 Run `fcitx5-configtool` and add "Magic Keyboard" to your input method list.
 
-### 5. Test the full flow
+### 6. Set up environment (Plasma session)
 
-1. Open a text editor (Kate, gedit, etc.)
-2. Click into a text field
-3. The keyboard should appear
-4. Click keys → text should appear in the editor
-5. Click outside the text field → keyboard should hide
+Create `~/.config/plasma-workspace/env/fcitx.sh`:
+
+```bash
+#!/bin/sh
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS=@im=fcitx
+```
+
+Then log out and back in.
+
+### 7. Test the full flow
+
+**Must test in Wayland session** (check with `echo $XDG_SESSION_TYPE`):
+
+1. Open Kate → click into text buffer → keyboard shows
+2. Click sidebar (non-text) → keyboard hides
+3. Click back into text → keyboard shows again
+4. Open Firefox → URL bar → keyboard shows
+5. Password field → keyboard should NOT show
+6. Throughout: **Kate/Firefox never loses focus to keyboard**
 
 ## Project Status
 

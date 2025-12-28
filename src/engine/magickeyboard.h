@@ -35,9 +35,8 @@ private:
   void handleFocusIn(fcitx::InputContext *ic);
   void handleFocusOut(fcitx::InputContext *ic);
 
-  // IM and capability checks
-  bool isMagicKeyboardActive(fcitx::InputContext *ic);
-  bool shouldShowKeyboard(fcitx::InputContext *ic);
+  // Decision: should we show keyboard for this IC?
+  int shouldShowKeyboard(fcitx::InputContext *ic, std::string &reason);
 
   void showKeyboard();
   void hideKeyboard();
