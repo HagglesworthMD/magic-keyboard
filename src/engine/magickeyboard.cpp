@@ -1,6 +1,6 @@
 /**
  * Magic Keyboard - Fcitx5 Input Method Engine
- * v0.1: Socket IPC for show/hide and key commits
+ * v0.1: Focus-driven show/hide + click-to-commit via Unix socket
  */
 
 #include "magickeyboard.h"
@@ -8,14 +8,15 @@
 
 #include <fcitx-utils/event.h>
 #include <fcitx-utils/log.h>
+#include <fcitx/event.h>
 #include <fcitx/inputpanel.h>
 
 #include <cstring>
 #include <fcntl.h>
 #include <signal.h>
-#include <sstream>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace magickeyboard {
@@ -30,15 +31,44 @@ MagicKeyboardFactory::create(fcitx::AddonManager *manager) {
 
 MagicKeyboardEngine::MagicKeyboardEngine(fcitx::Instance *instance)
     : instance_(instance) {
-  MKLOG(Info) << "Magic Keyboard engine initializing";
+  MKLOG(Info) << "Magic Keyboard engine starting";
+
   startSocketServer();
+
+  // Watch for our IM being activated/deactivated on any IC
+  // These events tell us when OUR input method is selected
+  focusInConn_ = instance_->watchEvent(
+      fcitx::EventType::InputContextInputMethodActivated,
+      fcitx::EventWatcherPhase::Default, [this](fcitx::Event &event) {
+        auto &imEvent = static_cast<fcitx::InputMethodActivatedEvent &>(event);
+        if (imEvent.name() == "magickeyboard") {
+          onFocusIn(imEvent.inputContext());
+        }
+      });
+
+  focusOutConn_ = instance_->watchEvent(
+      fcitx::EventType::InputContextInputMethodDeactivated,
+      fcitx::EventWatcherPhase::Default, [this](fcitx::Event &event) {
+        auto &imEvent =
+            static_cast<fcitx::InputMethodDeactivatedEvent &>(event);
+        if (imEvent.name() == "magickeyboard") {
+          onFocusOut(imEvent.inputContext());
+        }
+      });
+
+  MKLOG(Info) << "Magic Keyboard engine ready";
 }
 
 MagicKeyboardEngine::~MagicKeyboardEngine() {
   MKLOG(Info) << "Magic Keyboard engine shutting down";
+
+  focusInConn_.reset();
+  focusOutConn_.reset();
   stopSocketServer();
+
   if (uiPid_ > 0) {
     kill(uiPid_, SIGTERM);
+    waitpid(uiPid_, nullptr, WNOHANG);
   }
 }
 
@@ -47,7 +77,6 @@ void MagicKeyboardEngine::reloadConfig() {}
 std::vector<fcitx::InputMethodEntry> MagicKeyboardEngine::listInputMethods() {
   std::vector<fcitx::InputMethodEntry> result;
 
-  // Create entry with: uniqueName, name, languageCode, addonName
   auto entry = fcitx::InputMethodEntry("magic-keyboard", "Magic Keyboard", "en",
                                        "magickeyboard");
   entry.setLabel("MK");
@@ -62,18 +91,15 @@ std::vector<fcitx::InputMethodEntry> MagicKeyboardEngine::listInputMethods() {
 void MagicKeyboardEngine::activate(const fcitx::InputMethodEntry &,
                                    fcitx::InputContextEvent &event) {
   currentIC_ = event.inputContext();
-  MKLOG(Info) << "Activated: " << currentIC_->program();
-
-  if (uiPid_ <= 0)
-    launchUI();
-  showKeyboard();
+  MKLOG(Debug) << "activate(): " << currentIC_->program();
+  // Show will happen via InputMethodActivated event
 }
 
 void MagicKeyboardEngine::deactivate(const fcitx::InputMethodEntry &,
                                      fcitx::InputContextEvent &) {
-  MKLOG(Info) << "Deactivated";
-  hideKeyboard();
+  MKLOG(Debug) << "deactivate()";
   currentIC_ = nullptr;
+  // Hide will happen via InputMethodDeactivated event
 }
 
 void MagicKeyboardEngine::keyEvent(const fcitx::InputMethodEntry &,
@@ -90,26 +116,81 @@ void MagicKeyboardEngine::reset(const fcitx::InputMethodEntry &,
   }
 }
 
-void MagicKeyboardEngine::showKeyboard() { sendToUI("{\"type\":\"show\"}\n"); }
+void MagicKeyboardEngine::onFocusIn(fcitx::InputContext *ic) {
+  if (!ic)
+    return;
 
-void MagicKeyboardEngine::hideKeyboard() { sendToUI("{\"type\":\"hide\"}\n"); }
+  currentIC_ = ic;
+  MKLOG(Info) << "Focus-in -> show (" << ic->program() << ")";
+
+  ensureUIRunning();
+  showKeyboard();
+}
+
+void MagicKeyboardEngine::onFocusOut(fcitx::InputContext *ic) {
+  if (!ic)
+    return;
+
+  MKLOG(Info) << "Focus-out -> hide";
+  hideKeyboard();
+
+  if (ic == currentIC_) {
+    currentIC_ = nullptr;
+  }
+}
+
+void MagicKeyboardEngine::showKeyboard() {
+  if (keyboardVisible_)
+    return;
+
+  keyboardVisible_ = true;
+  sendToUI("{\"type\":\"show\"}\n");
+}
+
+void MagicKeyboardEngine::hideKeyboard() {
+  if (!keyboardVisible_)
+    return;
+
+  keyboardVisible_ = false;
+  sendToUI("{\"type\":\"hide\"}\n");
+}
 
 void MagicKeyboardEngine::sendToUI(const std::string &msg) {
-  if (clientFd_ >= 0) {
-    ssize_t n = write(clientFd_, msg.c_str(), msg.size());
-    if (n < 0) {
-      MKLOG(Warn) << "Failed to send to UI: " << strerror(errno);
-    }
+  if (clientFd_ < 0) {
+    MKLOG(Debug) << "No UI connected";
+    return;
   }
+
+  ssize_t n = write(clientFd_, msg.c_str(), msg.size());
+  if (n < 0) {
+    MKLOG(Warn) << "Send failed: " << strerror(errno);
+  }
+}
+
+void MagicKeyboardEngine::ensureUIRunning() {
+  if (clientFd_ >= 0)
+    return;
+  if (uiSpawnPending_)
+    return;
+
+  if (uiPid_ > 0) {
+    int status;
+    pid_t result = waitpid(uiPid_, &status, WNOHANG);
+    if (result == 0)
+      return; // Still running
+    uiPid_ = 0;
+  }
+
+  launchUI();
 }
 
 void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
   if (!currentIC_) {
-    MKLOG(Warn) << "Key but no IC";
+    MKLOG(Warn) << "Key but no active IC";
     return;
   }
 
-  MKLOG(Debug) << "Key: " << key;
+  MKLOG(Debug) << "Commit: " << key;
 
   if (key == "backspace") {
     currentIC_->forwardKey(fcitx::Key(FcitxKey_BackSpace), false);
@@ -119,26 +200,19 @@ void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
     currentIC_->forwardKey(fcitx::Key(FcitxKey_Return), true);
   } else if (key == "space") {
     currentIC_->commitString(" ");
-  } else if (key.length() == 1) {
-    currentIC_->commitString(key);
   } else {
-    // Multi-char like uppercase
     currentIC_->commitString(key);
   }
 }
 
 void MagicKeyboardEngine::processLine(const std::string &line) {
-  // Simple JSON parsing for v0.1
-  // Format: {"type":"key","text":"a"}
-
   if (line.find("\"type\":\"key\"") != std::string::npos) {
     auto pos = line.find("\"text\":\"");
     if (pos != std::string::npos) {
       pos += 8;
       auto end = line.find("\"", pos);
       if (end != std::string::npos) {
-        std::string text = line.substr(pos, end - pos);
-        handleKeyPress(text);
+        handleKeyPress(line.substr(pos, end - pos));
       }
     }
   }
@@ -147,7 +221,6 @@ void MagicKeyboardEngine::processLine(const std::string &line) {
 void MagicKeyboardEngine::startSocketServer() {
   std::string path = ipc::getSocketPath();
 
-  // Remove stale socket
   unlink(path.c_str());
 
   serverFd_ = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -175,9 +248,8 @@ void MagicKeyboardEngine::startSocketServer() {
     return;
   }
 
-  MKLOG(Info) << "Socket server listening at: " << path;
+  MKLOG(Info) << "Socket: " << path;
 
-  // Register with Fcitx5 event loop
   serverEvent_ = instance_->eventLoop().addIOEvent(
       serverFd_, fcitx::IOEventFlag::In,
       [this](fcitx::EventSource *, int fd, fcitx::IOEventFlags) {
@@ -188,8 +260,8 @@ void MagicKeyboardEngine::startSocketServer() {
           if (clientFd_ >= 0)
             close(clientFd_);
           clientFd_ = client;
+          uiSpawnPending_ = false;
 
-          // Set up read handler for client
           clientEvent_ = instance_->eventLoop().addIOEvent(
               clientFd_, fcitx::IOEventFlag::In,
               [this](fcitx::EventSource *, int, fcitx::IOEventFlags) {
@@ -199,7 +271,6 @@ void MagicKeyboardEngine::startSocketServer() {
                   buf[n] = '\0';
                   readBuffer_ += buf;
 
-                  // Process complete lines
                   size_t pos;
                   while ((pos = readBuffer_.find('\n')) != std::string::npos) {
                     std::string line = readBuffer_.substr(0, pos);
@@ -215,6 +286,11 @@ void MagicKeyboardEngine::startSocketServer() {
                 }
                 return true;
               });
+
+          // If keyboard should be visible, tell UI immediately
+          if (keyboardVisible_) {
+            sendToUI("{\"type\":\"show\"}\n");
+          }
         }
         return true;
       });
@@ -235,24 +311,26 @@ void MagicKeyboardEngine::stopSocketServer() {
 }
 
 void MagicKeyboardEngine::launchUI() {
-  MKLOG(Info) << "Launching UI";
+  uiSpawnPending_ = true;
 
   pid_t pid = fork();
   if (pid == 0) {
-    // Child - find UI binary
-    // Try local build first, then installed
-    const char *paths[] = {"./build/bin/magickeyboard-ui",
-                           "/usr/local/bin/magickeyboard-ui",
+    setsid();
+
+    const char *paths[] = {"/usr/local/bin/magickeyboard-ui",
                            "/usr/bin/magickeyboard-ui", nullptr};
+
     for (const char **p = paths; *p; ++p) {
       execl(*p, "magickeyboard-ui", nullptr);
     }
-    _exit(1);
+
+    _exit(127);
   } else if (pid > 0) {
     uiPid_ = pid;
-    MKLOG(Info) << "UI launched, pid=" << pid;
+    MKLOG(Info) << "UI spawned, pid=" << pid;
   } else {
-    MKLOG(Error) << "fork() failed";
+    MKLOG(Error) << "fork() failed: " << strerror(errno);
+    uiSpawnPending_ = false;
   }
 }
 
