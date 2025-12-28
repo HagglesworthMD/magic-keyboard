@@ -46,37 +46,39 @@ private:
   void launchUI();
   void ensureUIRunning();
 
+  // Watchdog to ensure keyboard hides if focus tracking fails
+  void startWatchdog();
+
   // === MEMBER DECLARATION ORDER MATTERS FOR DESTRUCTION ===
-  // Members are destroyed in REVERSE declaration order.
-  // We want: 1) gate set, 2) connections die, 3) sockets die, 4) rest
+  // Reverse order: first connections/watchers die, then sockets, then
+  // primitives.
 
   fcitx::Instance *instance_;
 
-  // Shutdown gate - checked in all callbacks, set first in destructor
+  // Shutdown gate - checked in all callbacks
   std::atomic<bool> shuttingDown_{false};
 
-  // Event watcher connections - MUST BE DESTROYED FIRST (declared early)
-  // These reference callbacks that use other members
+  // Event watchers - MUST be destroyed before the members they access
   std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>> focusInConn_;
   std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>> focusOutConn_;
 
-  // Socket event sources - destroyed after connections
+  // Timer for watchdog
+  std::unique_ptr<fcitx::EventSource> watchdogTimer_;
+
+  // Socket event sources
   std::unique_ptr<fcitx::EventSource> serverEvent_;
   std::unique_ptr<fcitx::EventSource> clientEvent_;
 
-  // Raw socket FDs
   int serverFd_ = -1;
   int clientFd_ = -1;
   std::string readBuffer_;
 
-  // UI process
   pid_t uiPid_ = 0;
   bool uiSpawnPending_ = false;
 
-  // Current IC for commits - only valid during callback
+  // Pointer valid only during callback context
   fcitx::InputContext *currentIC_ = nullptr;
 
-  // State
   bool keyboardVisible_ = false;
 };
 

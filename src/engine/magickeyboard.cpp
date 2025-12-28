@@ -1,6 +1,6 @@
 /**
  * Magic Keyboard - Fcitx5 Input Method Engine
- * v0.1: Focus-driven show/hide via InputContext FocusIn/FocusOut
+ * v0.1: Focus-driven show/hide + click-to-commit via Unix socket
  */
 
 #include "magickeyboard.h"
@@ -9,6 +9,7 @@
 #include <fcitx-utils/event.h>
 #include <fcitx-utils/log.h>
 #include <fcitx/event.h>
+#include <fcitx/inputcontextmanager.h>
 #include <fcitx/inputmethodmanager.h>
 #include <fcitx/inputpanel.h>
 
@@ -41,7 +42,7 @@ MagicKeyboardEngine::MagicKeyboardEngine(fcitx::Instance *instance)
       fcitx::EventType::InputContextFocusIn, fcitx::EventWatcherPhase::Default,
       [this](fcitx::Event &event) {
         if (shuttingDown_)
-          return; // Shutdown gate
+          return;
 
         auto &icEvent = static_cast<fcitx::FocusInEvent &>(event);
         auto *ic = icEvent.inputContext();
@@ -55,7 +56,7 @@ MagicKeyboardEngine::MagicKeyboardEngine(fcitx::Instance *instance)
       fcitx::EventType::InputContextFocusOut, fcitx::EventWatcherPhase::Default,
       [this](fcitx::Event &event) {
         if (shuttingDown_)
-          return; // Shutdown gate
+          return;
 
         auto &icEvent = static_cast<fcitx::FocusOutEvent &>(event);
         auto *ic = icEvent.inputContext();
@@ -65,29 +66,29 @@ MagicKeyboardEngine::MagicKeyboardEngine(fcitx::Instance *instance)
         handleFocusOut(ic);
       });
 
+  startWatchdog();
+
   MKLOG(Info) << "Magic Keyboard engine ready";
 }
 
 MagicKeyboardEngine::~MagicKeyboardEngine() {
-  MKLOG(Info) << "shutdown begin";
+  MKLOG(Info) << "MagicKeyboard: shutdown begin";
 
-  // SET GATE FIRST - prevents callbacks from running during teardown
   shuttingDown_ = true;
 
-  // Release watchers BEFORE touching any other resources they might use
+  // Kill connections first to stop callbacks
   focusInConn_.reset();
   focusOutConn_.reset();
+  watchdogTimer_.reset();
 
-  // Now safe to tear down socket (no more callbacks can fire)
   stopSocketServer();
 
-  // Clean up UI process (don't wait, just signal)
   if (uiPid_ > 0) {
     kill(uiPid_, SIGTERM);
-    // Don't waitpid - let init reap it
+    // Let init/systemd reap orphan
   }
 
-  MKLOG(Info) << "shutdown end";
+  MKLOG(Info) << "MagicKeyboard: shutdown end";
 }
 
 void MagicKeyboardEngine::reloadConfig() {}
@@ -108,7 +109,6 @@ std::vector<fcitx::InputMethodEntry> MagicKeyboardEngine::listInputMethods() {
 
 void MagicKeyboardEngine::activate(const fcitx::InputMethodEntry &,
                                    fcitx::InputContextEvent &event) {
-  // Track current IC for key commits (valid during this callback)
   currentIC_ = event.inputContext();
   MKLOG(Debug) << "activate()";
 }
@@ -169,7 +169,7 @@ int MagicKeyboardEngine::shouldShowKeyboard(fcitx::InputContext *ic,
 
 void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
   if (shuttingDown_)
-    return; // Defense in depth
+    return;
 
   std::string program = ic ? ic->program() : "?";
   std::string reason;
@@ -189,7 +189,7 @@ void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
 
 void MagicKeyboardEngine::handleFocusOut(fcitx::InputContext *ic) {
   if (shuttingDown_)
-    return; // Defense in depth
+    return;
 
   std::string program = ic ? ic->program() : "?";
 
@@ -282,6 +282,26 @@ void MagicKeyboardEngine::processLine(const std::string &line) {
   }
 }
 
+void MagicKeyboardEngine::startWatchdog() {
+  watchdogTimer_ = instance_->eventLoop().addTimeEvent(
+      CLOCK_MONOTONIC, fcitx::now(CLOCK_MONOTONIC) + 500000, 0,
+      [this](fcitx::EventSourceTime *source, uint64_t) {
+        if (shuttingDown_)
+          return false;
+
+        if (keyboardVisible_) {
+          auto *ic = instance_->inputContextManager().lastFocusedInputContext();
+          if (!ic || !ic->hasFocus()) {
+            MKLOG(Info) << "Watchdog: no focused IC found, forcing hide";
+            hideKeyboard();
+          }
+        }
+
+        source->setTime(fcitx::now(CLOCK_MONOTONIC) + 500000);
+        return true;
+      });
+}
+
 void MagicKeyboardEngine::startSocketServer() {
   std::string path = ipc::getSocketPath();
 
@@ -318,7 +338,7 @@ void MagicKeyboardEngine::startSocketServer() {
       serverFd_, fcitx::IOEventFlag::In,
       [this](fcitx::EventSource *, int fd, fcitx::IOEventFlags) {
         if (shuttingDown_)
-          return true; // Shutdown gate
+          return true;
 
         int client =
             accept4(fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
@@ -333,7 +353,7 @@ void MagicKeyboardEngine::startSocketServer() {
               clientFd_, fcitx::IOEventFlag::In,
               [this](fcitx::EventSource *, int, fcitx::IOEventFlags) {
                 if (shuttingDown_)
-                  return true; // Shutdown gate
+                  return true;
 
                 char buf[4096];
                 ssize_t n = read(clientFd_, buf, sizeof(buf) - 1);
@@ -366,8 +386,11 @@ void MagicKeyboardEngine::startSocketServer() {
 }
 
 void MagicKeyboardEngine::stopSocketServer() {
+  // HARDENED ORDER: kill event sources first to stop callbacks
   clientEvent_.reset();
   serverEvent_.reset();
+
+  // Only then close the fds
   if (clientFd_ >= 0) {
     close(clientFd_);
     clientFd_ = -1;

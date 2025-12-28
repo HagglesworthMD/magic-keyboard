@@ -107,16 +107,18 @@ Connected to engine
 Window ready, hidden until activation
 ```
 
-### 4. Install the UI binary and systemd service
+### 4. Install the binaries and systemd services
 
 ```bash
-# Install UI binary
+# Install binaries
+sudo cp build/lib/libmagickeyboard.so /usr/lib/x86_64-linux-gnu/fcitx5/
 sudo cp build/bin/magickeyboard-ui /usr/local/bin/
 
-# Install user service (optional but recommended)
+# Install user services
 mkdir -p ~/.config/systemd/user
-cp packaging/systemd/magickeyboard-ui.service ~/.config/systemd/user/
+cp packaging/systemd/*.service ~/.config/systemd/user/
 systemctl --user daemon-reload
+systemctl --user enable fcitx5
 systemctl --user enable magickeyboard-ui
 ```
 
@@ -135,9 +137,17 @@ export QT_IM_MODULE=fcitx
 export XMODIFIERS=@im=fcitx
 ```
 
-Then log out and back in.
+#### For Flatpak apps (Firefox, etc.)
+
+Run these to ensure IM works in sandboxed apps:
+```bash
+flatpak override --user --env=GTK_IM_MODULE=fcitx
+flatpak override --user --env=QT_IM_MODULE=fcitx
+flatpak override --user --env=XMODIFIERS=@im=fcitx
+```
 
 ### 7. Test the full flow
+
 
 **Must test in Wayland session** (check with `echo $XDG_SESSION_TYPE`):
 
