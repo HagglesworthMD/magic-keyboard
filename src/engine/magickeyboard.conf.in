@@ -1,0 +1,6 @@
+[InputMethod]
+Name=Magic Keyboard
+Icon=magic-keyboard
+Label=MK
+LangCode=en
+Addon=magickeyboard

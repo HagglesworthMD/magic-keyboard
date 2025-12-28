@@ -1,0 +1,60 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+
+# Qt generated
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.qmlc
+.qmlcache/
+.qml.cachegen/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.cproject
+.settings/
+*.user
+*.creator
+*.creator.user
+
+# Debug
+*.dSYM/
+core
+core.*
+
+# Package artifacts
+*.tar.gz
+*.tar.xz
+*.pkg.tar.zst
+*.deb
+*.rpm
+
+# Local install
+install_manifest.txt
+
+# Testing
+Testing/
+CTestTestfile.cmake

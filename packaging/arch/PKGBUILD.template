@@ -1,0 +1,24 @@
+# Maintainer: Your Name <your@email.com>
+pkgname=magic-keyboard
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="SteamOS Desktop Mode On-Screen Keyboard for KDE Plasma"
+arch=('x86_64')
+url="https://github.com/HagglesworthMD/magic-keyboard"
+license=('MIT')
+depends=('fcitx5' 'qt6-base' 'qt6-declarative')
+makedepends=('cmake' 'ninja')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cmake -S "$pkgname-$pkgver" -B build \
+        -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+}

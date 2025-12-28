@@ -1,0 +1,10 @@
+[Addon]
+Name=magickeyboard
+Category=InputMethod
+Library=magickeyboard
+Type=SharedLibrary
+OnDemand=True
+Version=@PROJECT_VERSION@
+
+[Addon/Dependencies]
+0=core

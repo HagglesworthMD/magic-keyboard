@@ -1,0 +1,255 @@
+{
+    "name": "QWERTY",
+    "version": "1.0",
+    "rows": [
+        {
+            "y": 0,
+            "keys": [
+                {
+                    "label": "q",
+                    "code": "q",
+                    "x": 0,
+                    "w": 1
+                },
+                {
+                    "label": "w",
+                    "code": "w",
+                    "x": 1,
+                    "w": 1
+                },
+                {
+                    "label": "e",
+                    "code": "e",
+                    "x": 2,
+                    "w": 1
+                },
+                {
+                    "label": "r",
+                    "code": "r",
+                    "x": 3,
+                    "w": 1
+                },
+                {
+                    "label": "t",
+                    "code": "t",
+                    "x": 4,
+                    "w": 1
+                },
+                {
+                    "label": "y",
+                    "code": "y",
+                    "x": 5,
+                    "w": 1
+                },
+                {
+                    "label": "u",
+                    "code": "u",
+                    "x": 6,
+                    "w": 1
+                },
+                {
+                    "label": "i",
+                    "code": "i",
+                    "x": 7,
+                    "w": 1
+                },
+                {
+                    "label": "o",
+                    "code": "o",
+                    "x": 8,
+                    "w": 1
+                },
+                {
+                    "label": "p",
+                    "code": "p",
+                    "x": 9,
+                    "w": 1
+                },
+                {
+                    "label": "⌫",
+                    "code": "backspace",
+                    "x": 10,
+                    "w": 1.5,
+                    "special": true
+                }
+            ]
+        },
+        {
+            "y": 1,
+            "offset": 0.25,
+            "keys": [
+                {
+                    "label": "a",
+                    "code": "a",
+                    "x": 0,
+                    "w": 1
+                },
+                {
+                    "label": "s",
+                    "code": "s",
+                    "x": 1,
+                    "w": 1
+                },
+                {
+                    "label": "d",
+                    "code": "d",
+                    "x": 2,
+                    "w": 1
+                },
+                {
+                    "label": "f",
+                    "code": "f",
+                    "x": 3,
+                    "w": 1
+                },
+                {
+                    "label": "g",
+                    "code": "g",
+                    "x": 4,
+                    "w": 1
+                },
+                {
+                    "label": "h",
+                    "code": "h",
+                    "x": 5,
+                    "w": 1
+                },
+                {
+                    "label": "j",
+                    "code": "j",
+                    "x": 6,
+                    "w": 1
+                },
+                {
+                    "label": "k",
+                    "code": "k",
+                    "x": 7,
+                    "w": 1
+                },
+                {
+                    "label": "l",
+                    "code": "l",
+                    "x": 8,
+                    "w": 1
+                },
+                {
+                    "label": "↵",
+                    "code": "enter",
+                    "x": 9,
+                    "w": 1.5,
+                    "special": true
+                }
+            ]
+        },
+        {
+            "y": 2,
+            "keys": [
+                {
+                    "label": "⇧",
+                    "code": "shift",
+                    "x": 0,
+                    "w": 1.5,
+                    "special": true
+                },
+                {
+                    "label": "z",
+                    "code": "z",
+                    "x": 1.5,
+                    "w": 1
+                },
+                {
+                    "label": "x",
+                    "code": "x",
+                    "x": 2.5,
+                    "w": 1
+                },
+                {
+                    "label": "c",
+                    "code": "c",
+                    "x": 3.5,
+                    "w": 1
+                },
+                {
+                    "label": "v",
+                    "code": "v",
+                    "x": 4.5,
+                    "w": 1
+                },
+                {
+                    "label": "b",
+                    "code": "b",
+                    "x": 5.5,
+                    "w": 1
+                },
+                {
+                    "label": "n",
+                    "code": "n",
+                    "x": 6.5,
+                    "w": 1
+                },
+                {
+                    "label": "m",
+                    "code": "m",
+                    "x": 7.5,
+                    "w": 1
+                },
+                {
+                    "label": ",",
+                    "code": ",",
+                    "x": 8.5,
+                    "w": 1
+                },
+                {
+                    "label": ".",
+                    "code": ".",
+                    "x": 9.5,
+                    "w": 1
+                }
+            ]
+        },
+        {
+            "y": 3,
+            "keys": [
+                {
+                    "label": "Copy",
+                    "code": "copy",
+                    "x": 0,
+                    "w": 1.25,
+                    "action": true
+                },
+                {
+                    "label": "Paste",
+                    "code": "paste",
+                    "x": 1.25,
+                    "w": 1.25,
+                    "action": true
+                },
+                {
+                    "label": "space",
+                    "code": "space",
+                    "x": 2.5,
+                    "w": 5,
+                    "special": true
+                },
+                {
+                    "label": "Cut",
+                    "code": "cut",
+                    "x": 7.5,
+                    "w": 1.25,
+                    "action": true
+                },
+                {
+                    "label": "SelAll",
+                    "code": "selectall",
+                    "x": 8.75,
+                    "w": 1.25,
+                    "action": true
+                }
+            ]
+        }
+    ],
+    "keyUnit": 60,
+    "keyHeight": 50,
+    "keySpacing": 6,
+    "keyRadius": 8
+}
