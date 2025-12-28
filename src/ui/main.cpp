@@ -21,22 +21,32 @@ class KeyboardBridge : public QObject {
 public:
   explicit KeyboardBridge(QObject *parent = nullptr) : QObject(parent) {
     socket_ = new QLocalSocket(this);
+    reconnectTimer_ = new QTimer(this);
+    reconnectTimer_->setSingleShot(true);
+    reconnectTimer_->setInterval(1000);
 
-    connect(socket_, &QLocalSocket::connected, this,
-            [this]() { qDebug() << "Connected to engine"; });
+    connect(socket_, &QLocalSocket::connected, this, [this]() {
+      qDebug() << "Connected to engine";
+      reconnecting_ = false;
+    });
 
     connect(socket_, &QLocalSocket::disconnected, this, [this]() {
-      qDebug() << "Disconnected, retrying...";
-      QTimer::singleShot(1000, this, &KeyboardBridge::connectToEngine);
+      qDebug() << "Disconnected from engine";
+      scheduleReconnect();
     });
 
     connect(socket_, &QLocalSocket::readyRead, this,
             &KeyboardBridge::onReadyRead);
 
-    connect(socket_, &QLocalSocket::errorOccurred, this, [this]() {
-      qDebug() << "Socket error:" << socket_->errorString();
-      QTimer::singleShot(1000, this, &KeyboardBridge::connectToEngine);
-    });
+    connect(socket_, &QLocalSocket::errorOccurred, this,
+            [this](QLocalSocket::LocalSocketError err) {
+              Q_UNUSED(err);
+              qDebug() << "Socket error:" << socket_->errorString();
+              scheduleReconnect();
+            });
+
+    connect(reconnectTimer_, &QTimer::timeout, this,
+            &KeyboardBridge::tryConnect);
   }
 
   bool isVisible() const { return visible_; }
@@ -48,17 +58,14 @@ public:
   }
 
 public slots:
-  void connectToEngine() {
-    QString path = QString::fromStdString(magickeyboard::ipc::getSocketPath());
-    qDebug() << "Connecting to:" << path;
-    socket_->connectToServer(path);
-  }
+  void connectToEngine() { tryConnect(); }
 
   void sendKey(const QString &key) {
+    if (socket_->state() != QLocalSocket::ConnectedState)
+      return;
     QString msg = QString("{\"type\":\"key\",\"text\":\"%1\"}\n").arg(key);
     socket_->write(msg.toUtf8());
     socket_->flush();
-    qDebug() << "Sent:" << key;
   }
 
 signals:
@@ -67,6 +74,29 @@ signals:
   void hideKeyboard();
 
 private slots:
+  void tryConnect() {
+    // Only connect if in unconnected state
+    if (socket_->state() != QLocalSocket::UnconnectedState) {
+      qDebug() << "Socket not unconnected, aborting first";
+      socket_->abort();
+      // Wait for state to settle
+      QTimer::singleShot(100, this, &KeyboardBridge::tryConnect);
+      return;
+    }
+
+    reconnecting_ = false;
+    QString path = QString::fromStdString(magickeyboard::ipc::getSocketPath());
+    qDebug() << "Connecting to:" << path;
+    socket_->connectToServer(path);
+  }
+
+  void scheduleReconnect() {
+    if (reconnecting_)
+      return;
+    reconnecting_ = true;
+    reconnectTimer_->start();
+  }
+
   void onReadyRead() {
     buffer_ += socket_->readAll();
 
@@ -76,12 +106,13 @@ private slots:
       buffer_.remove(0, idx + 1);
 
       QString msg = QString::fromUtf8(line);
-      qDebug() << "Received:" << msg;
 
       if (msg.contains("\"type\":\"show\"")) {
+        qDebug() << "Received: show";
         setVisible(true);
         emit showKeyboard();
       } else if (msg.contains("\"type\":\"hide\"")) {
+        qDebug() << "Received: hide";
         setVisible(false);
         emit hideKeyboard();
       }
@@ -90,8 +121,10 @@ private slots:
 
 private:
   QLocalSocket *socket_;
+  QTimer *reconnectTimer_;
   QByteArray buffer_;
   bool visible_ = false;
+  bool reconnecting_ = false;
 };
 
 int main(int argc, char *argv[]) {
@@ -135,17 +168,18 @@ int main(int argc, char *argv[]) {
             window->setPosition((r.width() - w) / 2, r.height() - h - 20);
           }
 
-          // Connect visibility
           QObject::connect(&bridge, &KeyboardBridge::showKeyboard, window,
                            [window]() { window->show(); });
           QObject::connect(&bridge, &KeyboardBridge::hideKeyboard, window,
                            [window]() { window->hide(); });
 
-          // Start hidden, connect to engine
+          // Start hidden
           window->hide();
+
+          // Connect to engine
           bridge.connectToEngine();
 
-          qDebug() << "Window ready, hidden until activation";
+          qDebug() << "Window ready, hidden until focus";
         }
       },
       Qt::QueuedConnection);

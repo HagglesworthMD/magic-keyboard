@@ -1,11 +1,10 @@
 #pragma once
 
 #include <fcitx-utils/event.h>
+#include <fcitx-utils/handlertable.h>
 #include <fcitx/addonfactory.h>
 #include <fcitx/addonmanager.h>
-#include <fcitx/focusgroup.h>
 #include <fcitx/inputcontext.h>
-#include <fcitx/inputcontextmanager.h>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/instance.h>
 
@@ -31,11 +30,15 @@ public:
   void reset(const fcitx::InputMethodEntry &,
              fcitx::InputContextEvent &) override;
 
-  // Called by focus watcher
-  void onFocusIn(fcitx::InputContext *ic);
-  void onFocusOut(fcitx::InputContext *ic);
-
 private:
+  // Focus event handlers - IC pointer valid only during call
+  void handleFocusIn(fcitx::InputContext *ic);
+  void handleFocusOut(fcitx::InputContext *ic);
+
+  // IM and capability checks
+  bool isMagicKeyboardActive(fcitx::InputContext *ic);
+  bool shouldShowKeyboard(fcitx::InputContext *ic);
+
   void showKeyboard();
   void hideKeyboard();
   void sendToUI(const std::string &msg);
@@ -47,6 +50,8 @@ private:
   void ensureUIRunning();
 
   fcitx::Instance *instance_;
+
+  // Current IC for commits - updated on focus/activate
   fcitx::InputContext *currentIC_ = nullptr;
 
   // Socket IPC
@@ -60,7 +65,7 @@ private:
   pid_t uiPid_ = 0;
   bool uiSpawnPending_ = false;
 
-  // Focus tracking connections
+  // Event watcher connections - must outlive callbacks
   std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>> focusInConn_;
   std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>> focusOutConn_;
 

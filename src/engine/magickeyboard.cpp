@@ -1,6 +1,6 @@
 /**
  * Magic Keyboard - Fcitx5 Input Method Engine
- * v0.1: Focus-driven show/hide + click-to-commit via Unix socket
+ * v0.1: Focus-driven show/hide via InputContext FocusIn/FocusOut
  */
 
 #include "magickeyboard.h"
@@ -9,6 +9,7 @@
 #include <fcitx-utils/event.h>
 #include <fcitx-utils/log.h>
 #include <fcitx/event.h>
+#include <fcitx/inputmethodmanager.h>
 #include <fcitx/inputpanel.h>
 
 #include <cstring>
@@ -35,25 +36,29 @@ MagicKeyboardEngine::MagicKeyboardEngine(fcitx::Instance *instance)
 
   startSocketServer();
 
-  // Watch for our IM being activated/deactivated on any IC
-  // These events tell us when OUR input method is selected
+  // Watch for actual text field focus changes
+  // These fire when ANY InputContext gains/loses focus
   focusInConn_ = instance_->watchEvent(
-      fcitx::EventType::InputContextInputMethodActivated,
-      fcitx::EventWatcherPhase::Default, [this](fcitx::Event &event) {
-        auto &imEvent = static_cast<fcitx::InputMethodActivatedEvent &>(event);
-        if (imEvent.name() == "magickeyboard") {
-          onFocusIn(imEvent.inputContext());
-        }
+      fcitx::EventType::InputContextFocusIn, fcitx::EventWatcherPhase::Default,
+      [this](fcitx::Event &event) {
+        // Extract IC info immediately, don't store pointer
+        auto &icEvent = static_cast<fcitx::FocusInEvent &>(event);
+        auto *ic = icEvent.inputContext();
+        if (!ic)
+          return;
+
+        handleFocusIn(ic);
       });
 
   focusOutConn_ = instance_->watchEvent(
-      fcitx::EventType::InputContextInputMethodDeactivated,
-      fcitx::EventWatcherPhase::Default, [this](fcitx::Event &event) {
-        auto &imEvent =
-            static_cast<fcitx::InputMethodDeactivatedEvent &>(event);
-        if (imEvent.name() == "magickeyboard") {
-          onFocusOut(imEvent.inputContext());
-        }
+      fcitx::EventType::InputContextFocusOut, fcitx::EventWatcherPhase::Default,
+      [this](fcitx::Event &event) {
+        auto &icEvent = static_cast<fcitx::FocusOutEvent &>(event);
+        auto *ic = icEvent.inputContext();
+        if (!ic)
+          return;
+
+        handleFocusOut(ic);
       });
 
   MKLOG(Info) << "Magic Keyboard engine ready";
@@ -62,8 +67,10 @@ MagicKeyboardEngine::MagicKeyboardEngine(fcitx::Instance *instance)
 MagicKeyboardEngine::~MagicKeyboardEngine() {
   MKLOG(Info) << "Magic Keyboard engine shutting down";
 
+  // Release watchers first
   focusInConn_.reset();
   focusOutConn_.reset();
+
   stopSocketServer();
 
   if (uiPid_ > 0) {
@@ -90,21 +97,19 @@ std::vector<fcitx::InputMethodEntry> MagicKeyboardEngine::listInputMethods() {
 
 void MagicKeyboardEngine::activate(const fcitx::InputMethodEntry &,
                                    fcitx::InputContextEvent &event) {
+  // Track current IC for key commits (valid during this callback)
   currentIC_ = event.inputContext();
-  MKLOG(Debug) << "activate(): " << currentIC_->program();
-  // Show will happen via InputMethodActivated event
+  MKLOG(Debug) << "activate()";
 }
 
 void MagicKeyboardEngine::deactivate(const fcitx::InputMethodEntry &,
                                      fcitx::InputContextEvent &) {
   MKLOG(Debug) << "deactivate()";
   currentIC_ = nullptr;
-  // Hide will happen via InputMethodDeactivated event
 }
 
 void MagicKeyboardEngine::keyEvent(const fcitx::InputMethodEntry &,
                                    fcitx::KeyEvent &keyEvent) {
-  // Pass through physical keyboard events
   keyEvent.filterAndAccept();
 }
 
@@ -116,25 +121,73 @@ void MagicKeyboardEngine::reset(const fcitx::InputMethodEntry &,
   }
 }
 
-void MagicKeyboardEngine::onFocusIn(fcitx::InputContext *ic) {
+// Check if Magic Keyboard is the active IM for this context
+bool MagicKeyboardEngine::isMagicKeyboardActive(fcitx::InputContext *ic) {
   if (!ic)
-    return;
+    return false;
 
-  currentIC_ = ic;
-  MKLOG(Info) << "Focus-in -> show (" << ic->program() << ")";
+  // Method 1: Check via Instance (safest, checks per-context)
+  const auto *entry = instance_->inputMethodEntry(ic);
+  if (entry && entry->addon() == "magickeyboard") {
+    return true;
+  }
 
-  ensureUIRunning();
-  showKeyboard();
+  // Method 2: Fall back to global current IM name
+  std::string currentIM = instance_->currentInputMethod();
+  return (currentIM == "magic-keyboard");
 }
 
-void MagicKeyboardEngine::onFocusOut(fcitx::InputContext *ic) {
+// Check if this context should show the keyboard
+bool MagicKeyboardEngine::shouldShowKeyboard(fcitx::InputContext *ic) {
   if (!ic)
-    return;
+    return false;
 
-  MKLOG(Info) << "Focus-out -> hide";
-  hideKeyboard();
+  // Must be using Magic Keyboard
+  if (!isMagicKeyboardActive(ic)) {
+    MKLOG(Debug) << "FocusIn: not our IM, skip";
+    return false;
+  }
 
-  if (ic == currentIC_) {
+  // Check capabilities - don't show for password fields
+  auto caps = ic->capabilityFlags();
+  if (caps.test(fcitx::CapabilityFlag::Password)) {
+    MKLOG(Debug) << "FocusIn: password field, skip";
+    return false;
+  }
+
+  return true;
+}
+
+void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
+  // All checks done inline, no pointer storage
+  std::string program = ic ? ic->program() : "unknown";
+
+  if (shouldShowKeyboard(ic)) {
+    MKLOG(Info) << "FocusIn -> show (" << program << ")";
+    currentIC_ = ic; // Update current IC for commits
+    ensureUIRunning();
+    showKeyboard();
+  } else {
+    // Another app/field got focus but not using our IM
+    // Hide if we were visible
+    if (keyboardVisible_) {
+      MKLOG(Info) << "FocusIn (other IM) -> hide";
+      hideKeyboard();
+    }
+  }
+}
+
+void MagicKeyboardEngine::handleFocusOut(fcitx::InputContext *ic) {
+  std::string program = ic ? ic->program() : "unknown";
+
+  // Always hide on focus-out, no debate
+  if (keyboardVisible_) {
+    MKLOG(Info) << "FocusOut -> hide (" << program << ")";
+    hideKeyboard();
+  }
+
+  // Clear current IC if it was the one that lost focus
+  if (currentIC_ == ic) {
     currentIC_ = nullptr;
   }
 }
@@ -177,7 +230,7 @@ void MagicKeyboardEngine::ensureUIRunning() {
     int status;
     pid_t result = waitpid(uiPid_, &status, WNOHANG);
     if (result == 0)
-      return; // Still running
+      return;
     uiPid_ = 0;
   }
 
@@ -287,7 +340,6 @@ void MagicKeyboardEngine::startSocketServer() {
                 return true;
               });
 
-          // If keyboard should be visible, tell UI immediately
           if (keyboardVisible_) {
             sendToUI("{\"type\":\"show\"}\n");
           }
