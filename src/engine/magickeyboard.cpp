@@ -37,11 +37,12 @@ MagicKeyboardEngine::MagicKeyboardEngine(fcitx::Instance *instance)
   startSocketServer();
 
   // Watch for actual text field focus changes
-  // These fire when ANY InputContext gains/loses focus
   focusInConn_ = instance_->watchEvent(
       fcitx::EventType::InputContextFocusIn, fcitx::EventWatcherPhase::Default,
       [this](fcitx::Event &event) {
-        // Extract IC info immediately, don't store pointer
+        if (shuttingDown_)
+          return; // Shutdown gate
+
         auto &icEvent = static_cast<fcitx::FocusInEvent &>(event);
         auto *ic = icEvent.inputContext();
         if (!ic)
@@ -53,6 +54,9 @@ MagicKeyboardEngine::MagicKeyboardEngine(fcitx::Instance *instance)
   focusOutConn_ = instance_->watchEvent(
       fcitx::EventType::InputContextFocusOut, fcitx::EventWatcherPhase::Default,
       [this](fcitx::Event &event) {
+        if (shuttingDown_)
+          return; // Shutdown gate
+
         auto &icEvent = static_cast<fcitx::FocusOutEvent &>(event);
         auto *ic = icEvent.inputContext();
         if (!ic)
@@ -65,18 +69,25 @@ MagicKeyboardEngine::MagicKeyboardEngine(fcitx::Instance *instance)
 }
 
 MagicKeyboardEngine::~MagicKeyboardEngine() {
-  MKLOG(Info) << "Magic Keyboard engine shutting down";
+  MKLOG(Info) << "shutdown begin";
 
-  // Release watchers first
+  // SET GATE FIRST - prevents callbacks from running during teardown
+  shuttingDown_ = true;
+
+  // Release watchers BEFORE touching any other resources they might use
   focusInConn_.reset();
   focusOutConn_.reset();
 
+  // Now safe to tear down socket (no more callbacks can fire)
   stopSocketServer();
 
+  // Clean up UI process (don't wait, just signal)
   if (uiPid_ > 0) {
     kill(uiPid_, SIGTERM);
-    waitpid(uiPid_, nullptr, WNOHANG);
+    // Don't waitpid - let init reap it
   }
+
+  MKLOG(Info) << "shutdown end";
 }
 
 void MagicKeyboardEngine::reloadConfig() {}
@@ -157,11 +168,13 @@ int MagicKeyboardEngine::shouldShowKeyboard(fcitx::InputContext *ic,
 }
 
 void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
+  if (shuttingDown_)
+    return; // Defense in depth
+
   std::string program = ic ? ic->program() : "?";
   std::string reason;
   int show = shouldShowKeyboard(ic, reason);
 
-  // Single-line operator log
   MKLOG(Info) << "FocusIn: " << program << " show=" << show << " (" << reason
               << ")";
 
@@ -175,6 +188,9 @@ void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
 }
 
 void MagicKeyboardEngine::handleFocusOut(fcitx::InputContext *ic) {
+  if (shuttingDown_)
+    return; // Defense in depth
+
   std::string program = ic ? ic->program() : "?";
 
   if (keyboardVisible_) {
@@ -301,6 +317,9 @@ void MagicKeyboardEngine::startSocketServer() {
   serverEvent_ = instance_->eventLoop().addIOEvent(
       serverFd_, fcitx::IOEventFlag::In,
       [this](fcitx::EventSource *, int fd, fcitx::IOEventFlags) {
+        if (shuttingDown_)
+          return true; // Shutdown gate
+
         int client =
             accept4(fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
         if (client >= 0) {
@@ -313,6 +332,9 @@ void MagicKeyboardEngine::startSocketServer() {
           clientEvent_ = instance_->eventLoop().addIOEvent(
               clientFd_, fcitx::IOEventFlag::In,
               [this](fcitx::EventSource *, int, fcitx::IOEventFlags) {
+                if (shuttingDown_)
+                  return true; // Shutdown gate
+
                 char buf[4096];
                 ssize_t n = read(clientFd_, buf, sizeof(buf) - 1);
                 if (n > 0) {

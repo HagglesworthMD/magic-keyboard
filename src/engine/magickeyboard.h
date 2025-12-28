@@ -8,6 +8,7 @@
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/instance.h>
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -31,11 +32,8 @@ public:
              fcitx::InputContextEvent &) override;
 
 private:
-  // Focus event handlers - IC pointer valid only during call
   void handleFocusIn(fcitx::InputContext *ic);
   void handleFocusOut(fcitx::InputContext *ic);
-
-  // Decision: should we show keyboard for this IC?
   int shouldShowKeyboard(fcitx::InputContext *ic, std::string &reason);
 
   void showKeyboard();
@@ -48,25 +46,35 @@ private:
   void launchUI();
   void ensureUIRunning();
 
+  // === MEMBER DECLARATION ORDER MATTERS FOR DESTRUCTION ===
+  // Members are destroyed in REVERSE declaration order.
+  // We want: 1) gate set, 2) connections die, 3) sockets die, 4) rest
+
   fcitx::Instance *instance_;
 
-  // Current IC for commits - updated on focus/activate
-  fcitx::InputContext *currentIC_ = nullptr;
+  // Shutdown gate - checked in all callbacks, set first in destructor
+  std::atomic<bool> shuttingDown_{false};
 
-  // Socket IPC
-  int serverFd_ = -1;
-  int clientFd_ = -1;
+  // Event watcher connections - MUST BE DESTROYED FIRST (declared early)
+  // These reference callbacks that use other members
+  std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>> focusInConn_;
+  std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>> focusOutConn_;
+
+  // Socket event sources - destroyed after connections
   std::unique_ptr<fcitx::EventSource> serverEvent_;
   std::unique_ptr<fcitx::EventSource> clientEvent_;
+
+  // Raw socket FDs
+  int serverFd_ = -1;
+  int clientFd_ = -1;
   std::string readBuffer_;
 
   // UI process
   pid_t uiPid_ = 0;
   bool uiSpawnPending_ = false;
 
-  // Event watcher connections - must outlive callbacks
-  std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>> focusInConn_;
-  std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>> focusOutConn_;
+  // Current IC for commits - only valid during callback
+  fcitx::InputContext *currentIC_ = nullptr;
 
   // State
   bool keyboardVisible_ = false;
