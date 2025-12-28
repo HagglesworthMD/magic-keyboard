@@ -107,24 +107,29 @@ Connected to engine
 Window ready, hidden until activation
 ```
 
-### 4. Install the binaries and systemd services
+### 4. Install the binaries and startup services
 
 ```bash
 # Install binaries
 sudo cp build/lib/libmagickeyboard.so /usr/lib/x86_64-linux-gnu/fcitx5/
 sudo cp build/bin/magickeyboard-ui /usr/local/bin/
 
-# Install user services
+# Install UI startup (KDE Autostart - Most reliable on SteamOS)
+mkdir -p ~/.config/autostart
+cp /home/deck/.config/autostart/magickeyboard-ui.desktop ~/.config/autostart/
+
+# OR Install UI as systemd user service
 mkdir -p ~/.config/systemd/user
-cp packaging/systemd/*.service ~/.config/systemd/user/
+cp packaging/systemd/magickeyboard-ui.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable fcitx5
-systemctl --user enable magickeyboard-ui
+systemctl --user enable --now magickeyboard-ui
 ```
 
-### 5. Configure Fcitx5 to use Magic Keyboard
+### 5. Configure Fcitx5 (KDE System Settings)
 
-Run `fcitx5-configtool` and add "Magic Keyboard" to your input method list.
+1. Open **KDE System Settings** -> **Input Method**.
+2. If Fcitx5 is not your current IM, set it as the active one.
+3. Add "Magic Keyboard" to your input methods list.
 
 ### 6. Set up environment (Plasma session)
 
@@ -136,6 +141,7 @@ export GTK_IM_MODULE=fcitx
 export QT_IM_MODULE=fcitx
 export XMODIFIERS=@im=fcitx
 ```
+
 
 #### For Flatpak apps (Firefox, etc.)
 

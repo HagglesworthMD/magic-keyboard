@@ -1,20 +1,15 @@
 [Unit]
-Description=Magic Keyboard UI for Fcitx5
-Documentation=https://github.com/HagglesworthMD/magic-keyboard
-PartOf=graphical-session.target
+Description=Magic Keyboard UI
 After=graphical-session.target
+PartOf=graphical-session.target
 
 [Service]
-Type=simple
 ExecStart=/usr/local/bin/magickeyboard-ui
 Restart=on-failure
-RestartSec=2
+RestartSec=1
+StartLimitIntervalSec=0
 Environment=QT_QPA_PLATFORM=wayland
 Environment=QT_WAYLAND_DISABLE_WINDOWDECORATION=1
-
-# Security hardening
-NoNewPrivileges=yes
-PrivateTmp=yes
 
 [Install]
 WantedBy=graphical-session.target
