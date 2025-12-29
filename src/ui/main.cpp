@@ -5,6 +5,9 @@
 
 #include <QDebug>
 #include <QGuiApplication>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -236,77 +239,61 @@ private slots:
           }
         }
       } else if (msg.contains("\"type\":\"ui_intent\"")) {
-        qDebug() << "Received ui_intent:" << msg;
-        if (state_ == Hidden) {
-          qDebug() << "Ignored ui_intent (Hidden state)";
+        QJsonDocument doc = QJsonDocument::fromJson(msg.toUtf8());
+        if (doc.isNull() || !doc.isObject()) {
+          qWarning() << "Malformed ui_intent JSON:" << msg;
         } else {
-          // Minimal manual JSON parsing to avoid deps
-          auto getString = [&](const QString &key) -> QString {
-            QString pf = "\"" + key + "\":\"";
-            int s = msg.indexOf(pf);
-            if (s < 0)
-              return QString();
-            s += pf.length();
-            int e = msg.indexOf("\"", s);
-            if (e < 0)
-              return QString();
-            return msg.mid(s, e - s);
-          };
+          QJsonObject obj = doc.object();
+          if (state_ == Hidden) {
+            qDebug() << "Ignored ui_intent (Hidden state)";
+          } else {
+            QString intent = obj.value("intent").toString();
+            if (intent == "key") {
+              QString val = obj.value("value").toString();
+              if (!val.isEmpty())
+                sendKey(val);
+            } else if (intent == "action") {
+              QString val = obj.value("value").toString();
+              if (!val.isEmpty())
+                sendAction(val);
+            } else if (intent == "swipe") {
+              QString dir = obj.value("dir").toString().toLower();
 
-          auto getDouble = [&](const QString &key,
-                               double defVal = 1.0) -> double {
-            QString pf = "\"" + key + "\":";
-            int s = msg.indexOf(pf);
-            if (s < 0)
-              return defVal;
-            s += pf.length();
-            // Find end of number: , or }
-            int e1 = msg.indexOf(",", s);
-            int e2 = msg.indexOf("}", s);
-            int e = (e1 == -1) ? e2 : (e2 == -1 ? e1 : std::min(e1, e2));
-            if (e < 0)
-              return defVal;
-            QString num = msg.mid(s, e - s).trimmed();
-            // Handle optional quotes around number: "0.5"
-            if (num.startsWith("\"") && num.endsWith("\"") && num.size() >= 2) {
-              num = num.mid(1, num.size() - 2).trimmed();
+              // Robust mag parsing: handle numeric or string-quoted numeric
+              double mag = 1.0;
+              QJsonValue vmag = obj.value("mag");
+              if (vmag.isDouble()) {
+                mag = vmag.toDouble();
+              } else if (vmag.isString()) {
+                bool ok = false;
+                double v = vmag.toString().toDouble(&ok);
+                if (ok)
+                  mag = v;
+              }
+
+              // Clamp mag to safe range 0.1..3.0
+              mag = std::max(0.1, std::min(3.0, mag));
+
+              double len = 100.0 * mag;
+              double dx = 0, dy = 0;
+              if (dir == "left")
+                dx = -len;
+              else if (dir == "right")
+                dx = len;
+              else if (dir == "up")
+                dy = -len;
+              else if (dir == "down")
+                dy = len;
+              else {
+                qWarning() << "Ignored ui_intent swipe: unknown dir =" << dir;
+                return;
+              }
+
+              QVariantList path;
+              path << QVariantMap{{"x", 0.0}, {"y", 0.0}};
+              path << QVariantMap{{"x", dx}, {"y", dy}};
+              sendSwipePath(path);
             }
-            bool ok = false;
-            double v = num.toDouble(&ok);
-            return ok ? v : defVal;
-          };
-
-          QString intent = getString("intent");
-          if (intent == "key") {
-            QString val = getString("value");
-            if (!val.isEmpty())
-              sendKey(val);
-          } else if (intent == "action") {
-            QString val = getString("value");
-            if (!val.isEmpty())
-              sendAction(val);
-          } else if (intent == "swipe") {
-            QString dir = getString("dir");
-            double mag = getDouble("mag");
-            double len = 100.0 * mag;
-            double dx = 0, dy = 0;
-            if (dir == "left")
-              dx = -len;
-            else if (dir == "right")
-              dx = len;
-            else if (dir == "up")
-              dy = -len;
-            else if (dir == "down")
-              dy = len;
-            else {
-              qWarning() << "Ignored ui_intent swipe: unknown dir =" << dir;
-              return;
-            }
-
-            QVariantList path;
-            path << QVariantMap{{"x", 0.0}, {"y", 0.0}};
-            path << QVariantMap{{"x", dx}, {"y", dy}};
-            sendSwipePath(path);
           }
         }
       } else if (msg.contains("\"type\":\"swipe_keys\"")) {

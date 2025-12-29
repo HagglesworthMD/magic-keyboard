@@ -1,6 +1,7 @@
 #include "protocol.h"
 #include <cstring>
 #include <iostream>
+#include <poll.h>
 #include <string>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -76,9 +77,11 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  // Wait for acknowledgment (Agent #4 fix)
-  // For ui-intent, we fire-and-forget to avoid stalling CI/tests if engine busy
-  if (cmd != "ui-intent") {
+  // Wait for acknowledgment (Agent #4 fix) with 100ms timeout
+  struct pollfd pfd;
+  pfd.fd = fd;
+  pfd.events = POLLIN;
+  if (poll(&pfd, 1, 100) > 0) {
     char buf[128];
     ssize_t n = read(fd, buf, sizeof(buf) - 1);
     if (n > 0) {
