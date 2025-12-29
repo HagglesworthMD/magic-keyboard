@@ -14,6 +14,7 @@
 
 #include "protocol.h"
 #include <QElapsedTimer>
+#include <algorithm>
 
 class KeyboardBridge : public QObject {
   Q_OBJECT
@@ -265,7 +266,14 @@ private slots:
             int e = (e1 == -1) ? e2 : (e2 == -1 ? e1 : std::min(e1, e2));
             if (e < 0)
               return defVal;
-            return msg.mid(s, e - s).toDouble();
+            QString num = msg.mid(s, e - s).trimmed();
+            // Handle optional quotes around number: "0.5"
+            if (num.startsWith("\"") && num.endsWith("\"") && num.size() >= 2) {
+              num = num.mid(1, num.size() - 2).trimmed();
+            }
+            bool ok = false;
+            double v = num.toDouble(&ok);
+            return ok ? v : defVal;
           };
 
           QString intent = getString("intent");
