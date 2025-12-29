@@ -89,10 +89,26 @@ public:
 public slots:
   void connectToEngine() { tryConnect(); }
 
+  // Helper to promote Passive -> Active with debounce
+  // Returns true if promoted, false if already Active or ignored
+  bool promoteIfPassive(const QString &reason) {
+    if (state_ == Active)
+      return false;
+    if (state_ == Hidden)
+      return false; // Should not happen if UI behaves, but safe guard
+
+    // Debounce promotions to avoid spamming state changes/logs on rapid bursts
+    if (lastPromotionTimer_.isValid() && lastPromotionTimer_.elapsed() < 150) {
+      return false;
+    }
+
+    setState(Active, reason);
+    lastPromotionTimer_.restart();
+    return true;
+  }
+
   void sendKey(const QString &key) {
-    // Any interaction upgrades to Active
-    if (state_ == Passive)
-      setState(Active, "user_key");
+    promoteIfPassive("intent_key");
 
     if (socket_->state() != QLocalSocket::ConnectedState)
       return;
@@ -102,8 +118,7 @@ public slots:
   }
 
   void sendAction(const QString &action) {
-    if (state_ == Passive)
-      setState(Active, "user_action");
+    promoteIfPassive("intent_action");
 
     if (socket_->state() != QLocalSocket::ConnectedState)
       return;
@@ -114,8 +129,7 @@ public slots:
   }
 
   void sendSwipePath(const QVariantList &path) {
-    if (state_ == Passive)
-      setState(Active, "user_swipe");
+    promoteIfPassive("intent_swipe");
 
     if (socket_->state() != QLocalSocket::ConnectedState)
       return;
@@ -220,6 +234,39 @@ private slots:
             setState(Hidden, "ipc_toggle");
           }
         }
+      } else if (msg.contains("\"type\":\"ui_intent\"")) {
+        qDebug() << "Received ui_intent:" << msg;
+        if (state_ == Hidden) {
+          qDebug() << "Ignored ui_intent (Hidden state)";
+        } else {
+          // Minimal manual JSON parsing to avoid deps
+          auto getValue = [&](const QString &keyName) {
+            QString pf = "\"" + keyName + "\":\"";
+            int s = msg.indexOf(pf);
+            if (s < 0)
+              return QString();
+            s += pf.length();
+            int e = msg.indexOf("\"", s);
+            return msg.mid(s, e - s);
+          };
+
+          QString intent = getValue("intent");
+          if (intent == "key") {
+            QString val = getValue("value");
+            if (!val.isEmpty())
+              sendKey(val);
+          } else if (intent == "action") {
+            QString val = getValue("value");
+            if (!val.isEmpty())
+              sendAction(val);
+          } else if (intent == "swipe") {
+            // Synthesize a dummy path to exercise the pipeline
+            QVariantList path;
+            path << QVariantMap{{"x", 0.0}, {"y", 0.0}};
+            path << QVariantMap{{"x", 10.0}, {"y", 0.0}};
+            sendSwipePath(path);
+          }
+        }
       } else if (msg.contains("\"type\":\"swipe_keys\"")) {
         QStringList keys;
         int arrKeyPos = msg.indexOf("\"keys\":[");
@@ -264,8 +311,7 @@ private slots:
 
 public slots:
   void commitCandidate(const QString &word) {
-    if (state_ == Passive)
-      setState(Active, "user_candidate");
+    promoteIfPassive("intent_candidate");
 
     if (socket_->state() != QLocalSocket::ConnectedState)
       return;
@@ -287,8 +333,9 @@ private:
   bool reconnecting_ = false;
   int reconnectDelayMs_ = kInitialReconnectDelayMs;
   QElapsedTimer lastToggleTimer_;
-  QElapsedTimer toggleLogTimer_; // For rate-limiting toggle logs
-  int toggleCount_ = 0;          // Toggles in current 1s window
+  QElapsedTimer toggleLogTimer_;     // For rate-limiting toggle logs
+  QElapsedTimer lastPromotionTimer_; // For debouncing promotions
+  int toggleCount_ = 0;              // Toggles in current 1s window
 
 signals:
   void stateChanged();

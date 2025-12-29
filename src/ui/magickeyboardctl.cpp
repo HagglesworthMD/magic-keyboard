@@ -20,6 +20,30 @@ int main(int argc, char *argv[]) {
     msg = "{\"type\":\"ui_hide\"}\n";
   } else if (cmd == "toggle") {
     msg = "{\"type\":\"ui_toggle\"}\n";
+  } else if (cmd == "ui-intent") {
+    if (argc < 4) {
+      std::cerr << "Usage: magickeyboardctl ui-intent <key|action|swipe> "
+                   "<value> [...]"
+                << std::endl;
+      return 1;
+    }
+    std::string type = argv[2];
+    std::string val = argv[3];
+    if (type == "key") {
+      msg = "{\"type\":\"ui_intent\",\"intent\":\"key\",\"value\":\"" + val +
+            "\"}\n";
+    } else if (type == "action") {
+      msg = "{\"type\":\"ui_intent\",\"intent\":\"action\",\"value\":\"" + val +
+            "\"}\n";
+    } else if (type == "swipe") {
+      // Swipe expects dir (val) and optional magnitude
+      std::string mag = (argc > 4) ? argv[4] : "1.0";
+      msg = "{\"type\":\"ui_intent\",\"intent\":\"swipe\",\"dir\":\"" + val +
+            "\",\"mag\":" + mag + "}\n";
+    } else {
+      std::cerr << "Unknown intent type: " << type << std::endl;
+      return 1;
+    }
   } else {
     std::cerr << "Unknown command: " << cmd << std::endl;
     return 1;
@@ -53,11 +77,14 @@ int main(int argc, char *argv[]) {
   }
 
   // Wait for acknowledgment (Agent #4 fix)
-  char buf[128];
-  ssize_t n = read(fd, buf, sizeof(buf) - 1);
-  if (n > 0) {
-    buf[n] = '\0';
-    // Optional: could print buf if we care about the message
+  // For ui-intent, we fire-and-forget to avoid stalling CI/tests if engine busy
+  if (cmd != "ui-intent") {
+    char buf[128];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    if (n > 0) {
+      buf[n] = '\0';
+      // Optional: could print buf if we care about the message
+    }
   }
 
   close(fd);

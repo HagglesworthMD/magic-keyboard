@@ -219,7 +219,12 @@ Window {
         anchors.fill: parent
         hoverEnabled: true
         
+        // Intent Router: Only process inputs if not Hidden
+        visible: bridge.state !== KeyboardBridge.Hidden 
+
         onPositionChanged: (mouse) => {
+            if (bridge.state === KeyboardBridge.Hidden) return
+            
             let key = root.getKeyAt(mouse.x, mouse.y)
             if (root.hoverKey !== key) {
                 if (root.hoverKey) root.hoverKey.isHovered = false
@@ -236,15 +241,16 @@ Window {
                 if (!root.isSwiping) {
                     if (dist > root.deadzone && dt > root.timeThreshold) {
                         root.isSwiping = true
+                        console.log("Intent: Swipe started") // Intent Log
                         if (root.activeKey) root.activeKey.isPressed = false
                         // Store both window (wx, wy) and layout (x, y) coordinates
-                        let lp = root.mapToItem(keysContainer, mouse.x, mouse.y)
+                        // Fix: root is Window, use keysContainer.mapFromItem
+                        let lp = keysContainer.mapFromItem(masterMouse, mouse.x, mouse.y)
                         root.currentPath = [{wx: mouse.x, wy: mouse.y, x: lp.x, y: lp.y}]
                         trailCanvas.requestPaint()
                     }
                 } else {
                     // Smoothing (EMA) on window space for visual consistency
-                    // Path may be empty/null during rapid reinit or lifecycle transitions
                     let last = root.currentPath[root.currentPath.length - 1]
                     if (!last) return;
                     let nwx = root.smoothingAlpha * mouse.x + (1 - root.smoothingAlpha) * last.wx
@@ -253,7 +259,7 @@ Window {
                     let rdist = Math.sqrt(Math.pow(nwx - last.wx, 2) + Math.pow(nwy - last.wy, 2))
                     
                     if (rdist >= root.resampleDist) {
-                        let nlp = root.mapToItem(keysContainer, nwx, nwy)
+                        let nlp = keysContainer.mapFromItem(masterMouse, nwx, nwy)
                         root.currentPath.push({wx: nwx, wy: nwy, x: nlp.x, y: nlp.y})
                         trailCanvas.requestPaint()
                     }
@@ -262,6 +268,8 @@ Window {
         }
         
         onPressed: (mouse) => {
+            if (bridge.state === KeyboardBridge.Hidden) return
+
             root.startPos = Qt.point(mouse.x, mouse.y)
             root.startTime = Date.now()
             root.isSwiping = false
@@ -277,9 +285,11 @@ Window {
         }
         
         onReleased: (mouse) => {
+            if (bridge.state === KeyboardBridge.Hidden) return
+
             if (root.isSwiping) {
                 let duration = Date.now() - root.startTime
-                console.log("SwipeUI points=" + root.currentPath.length + " resample=" + root.resampleDist + "px deadzone=" + root.deadzone.toFixed(1) + "px duration=" + duration + "ms sent=1")
+                console.log("Intent: Swipe Committed points=" + root.currentPath.length)
                 
                 // Construct points for engine (layout space)
                 let enginePath = []
@@ -290,8 +300,17 @@ Window {
             } else {
                 if (root.activeKey) {
                     root.activeKey.isPressed = false
+                    console.log("Intent: Key Tap code=" + root.activeKey.code)
+
                     if (root.activeKey.code === "shift") {
                         root.shiftActive = !root.shiftActive
+                        // Shift doesn't promote to Active; it's a modifier
+                        // But wait, user interaction usually promotes. 
+                        // Let's stick to C++ rule: ANY sendKey promotes.
+                        // Shift keeps state passive unless we send it? 
+                        // Current logic: Shift is local UI state. 
+                        // To promote on Shift, we might want to requestState?
+                        // For now, let's allow Shift to be Passive.
                     } else if (root.activeKey.action !== "") {
                         bridge.sendAction(root.activeKey.action)
                     } else {

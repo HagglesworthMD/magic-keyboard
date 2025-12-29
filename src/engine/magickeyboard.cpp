@@ -813,7 +813,8 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
     }
   } else if (line.find("\"type\":\"ui_show\"") != std::string::npos ||
              line.find("\"type\":\"ui_hide\"") != std::string::npos ||
-             line.find("\"type\":\"ui_toggle\"") != std::string::npos) {
+             line.find("\"type\":\"ui_toggle\"") != std::string::npos ||
+             line.find("\"type\":\"ui_intent\"") != std::string::npos) {
     // Sender-side throttling for toggle (100ms)
     bool isToggle = line.find("\"type\":\"ui_toggle\"") != std::string::npos;
     bool shouldSend = true;
