@@ -928,6 +928,7 @@ void MagicKeyboardEngine::startWatchdog() {
 void MagicKeyboardEngine::startSocketServer() {
   std::string path = ipc::getSocketPath();
 
+  // Remove stale socket file (ignore errors - file may not exist)
   unlink(path.c_str());
 
   serverFd_ = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -955,7 +956,7 @@ void MagicKeyboardEngine::startSocketServer() {
     return;
   }
 
-  MKLOG(Info) << "Socket: " << path;
+  MKLOG(Info) << "Socket server listening: " << path;
 
   serverEvent_ = instance_->eventLoop().addIOEvent(
       serverFd_, fcitx::IOEventFlag::In,
