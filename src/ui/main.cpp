@@ -298,9 +298,10 @@ private slots:
               dy = -len;
             else if (dir == "down")
               dy = len;
-            // Default to right if unknown/empty to ensure path has length
-            if (dx == 0 && dy == 0)
-              dx = 10.0;
+            else {
+              qWarning() << "Ignored ui_intent swipe: unknown dir =" << dir;
+              return;
+            }
 
             QVariantList path;
             path << QVariantMap{{"x", 0.0}, {"y", 0.0}};
