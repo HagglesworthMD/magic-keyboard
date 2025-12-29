@@ -977,6 +977,11 @@ void MagicKeyboardEngine::startSocketServer() {
                 if (shuttingDown_)
                   return true;
 
+                // Guard: ensure client still exists (could be removed during
+                // teardown)
+                if (clients_.find(clientFd) == clients_.end())
+                  return true;
+
                 char buf[1024];
                 ssize_t n = read(clientFd, buf, sizeof(buf) - 1);
                 if (n > 0) {
