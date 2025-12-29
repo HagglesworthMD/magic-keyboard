@@ -39,6 +39,7 @@ public:
     reconnectTimer_->setSingleShot(true);
     lastToggleTimer_.start();
     toggleLogTimer_.start();
+    swipeSeq_ = 1;
 
     connect(socket_, &QLocalSocket::connected, this, [this]() {
       qDebug() << "Connected to engine";
@@ -78,6 +79,22 @@ public:
   // Helper for QML to request state changes
   Q_INVOKABLE void requestState(State newState, const QString &reason) {
     setState(newState, reason);
+  }
+
+  Q_INVOKABLE void toggleVisibility() {
+    if (state_ == Hidden) {
+      setState(Passive, "ui_button_toggle");
+      if (socket_->state() == QLocalSocket::ConnectedState) {
+        socket_->write("{\"type\":\"ui_show\"}\n");
+        socket_->flush();
+      }
+    } else {
+      setState(Hidden, "ui_button_toggle");
+      if (socket_->state() == QLocalSocket::ConnectedState) {
+        socket_->write("{\"type\":\"ui_hide\"}\n");
+        socket_->flush();
+      }
+    }
   }
 
   void setState(State s, const QString &reason) {
@@ -144,7 +161,6 @@ public slots:
     if (socket_->state() != QLocalSocket::ConnectedState)
       return;
 
-    // Path is list of {x, y} already in layout space
     QString pointsJson = "[";
     for (int i = 0; i < path.size(); ++i) {
       QVariantMap pt = path[i].toMap();
@@ -156,13 +172,16 @@ public slots:
     }
     pointsJson += "]";
 
-    QString msg = QString("{\"type\":\"swipe_path\",\"layout\":\"qwerty\","
-                          "\"space\":\"layout\",\"points\":%1}\n")
+    lastSwipeSeqSent_ = swipeSeq_++;
+    QString msg = QString("{\"type\":\"swipe_path\",\"seq\":%1,\"layout\":\""
+                          "qwerty\",\"space\":\"layout\",\"points\":%2}\n")
+                      .arg(lastSwipeSeqSent_)
                       .arg(pointsJson);
     socket_->write(msg.toUtf8());
     socket_->flush();
     lastSwipeSentTimer_.restart();
-    qDebug() << "Sent swipe_path layout=qwerty points=" << path.size();
+    qDebug() << "Sent swipe_path seq=" << lastSwipeSeqSent_
+             << "layout=qwerty points=" << path.size();
   }
 
 private slots:
@@ -176,8 +195,23 @@ private slots:
     }
 
     reconnecting_ = false;
-    QString path = QString::fromStdString(magickeyboard::ipc::getSocketPath());
-    socket_->connectToServer(path);
+    QString socketPath =
+        QString::fromStdString(magickeyboard::ipc::getSocketPath()).trimmed();
+
+    if (socketPath.isEmpty()) {
+      qWarning() << "Socket path is empty, cannot connect";
+      return;
+    }
+
+    // AF_UNIX path limit is usually 108 chars
+    if (socketPath.length() > 107) {
+      qWarning() << "Socket path is too long:" << socketPath.length()
+                 << "chars (max 107)";
+      return;
+    }
+
+    qDebug() << "Connecting to socket:" << socketPath;
+    socket_->connectToServer(socketPath);
   }
 
   void scheduleReconnect() {
@@ -351,13 +385,23 @@ private slots:
               }
             }
           }
-          if (lastSwipeSentTimer_.isValid()) {
-            qDebug() << "Received swipe_keys count=" << keys.size()
+          uint64_t seq = 0;
+          bool hasSeq = obj.contains("seq");
+          if (hasSeq) {
+            seq = obj.value("seq").toVariant().toULongLong();
+          }
+
+          if (lastSwipeSentTimer_.isValid() && hasSeq &&
+              seq == lastSwipeSeqSent_) {
+            qDebug() << "Received swipe_keys seq=" << seq
+                     << "count=" << keys.size()
                      << "latency_ms=" << lastSwipeSentTimer_.elapsed()
                      << "keys=" << keys.join("-");
             lastSwipeSentTimer_.invalidate();
           } else {
-            qDebug() << "Received swipe_keys count=" << keys.size();
+            qDebug() << "Received swipe_keys count=" << keys.size()
+                     << "seq=" << (hasSeq ? QString::number(seq) : "missing")
+                     << (hasSeq ? "(mismatch or stale)" : "(dropping)");
           }
           emit swipeKeysReceived(keys);
         } else if (type == "swipe_candidates" ||
@@ -390,8 +434,21 @@ private slots:
               }
             }
           }
-          qDebug() << "Received swipe_candidates count=" << words.size();
-          emit swipeCandidatesReceived(words);
+          uint64_t seq = 0;
+          bool hasSeq = obj.contains("seq");
+          if (hasSeq) {
+            seq = obj.value("seq").toVariant().toULongLong();
+          }
+
+          if (hasSeq && seq != lastSwipeSeqSent_) {
+            qDebug() << "Received swipe_candidates count=" << words.size()
+                     << "seq=" << seq << "(stale, expected" << lastSwipeSeqSent_
+                     << ")";
+          } else {
+            qDebug() << "Received swipe_candidates count=" << words.size()
+                     << "seq=" << (hasSeq ? QString::number(seq) : "missing");
+            emit swipeCandidatesReceived(words);
+          }
         }
       }
     }
@@ -424,7 +481,9 @@ private:
   QElapsedTimer toggleLogTimer_;     // For rate-limiting toggle logs
   QElapsedTimer lastPromotionTimer_; // For debouncing promotions
   QElapsedTimer lastSwipeSentTimer_; // For latency tracking
-  int toggleCount_ = 0;              // Toggles in current 1s window
+  uint64_t swipeSeq_ = 1;
+  uint64_t lastSwipeSeqSent_ = 0;
+  int toggleCount_ = 0; // Toggles in current 1s window
 
 signals:
   void stateChanged();

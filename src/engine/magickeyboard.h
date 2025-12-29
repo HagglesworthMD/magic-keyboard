@@ -158,6 +158,9 @@ private:
 
   int levenshtein(const std::string &s1, const std::string &s2, int limit);
   double scoreCandidate(const std::string &keys, const DictWord &dw);
+
+  std::vector<std::string> dataDirs() const;
+  std::string findDataFile(const std::string &relPath) const;
 };
 
 class MagicKeyboardFactory : public fcitx::AddonFactory {

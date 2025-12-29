@@ -542,28 +542,25 @@ void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
 
 void MagicKeyboardEngine::loadLayout(const std::string &layoutName) {
   keys_.clear();
-  std::vector<std::string> searchPaths = {
-      "data/layouts/" + layoutName + ".json",
-      "/usr/local/share/magic-keyboard/layouts/" + layoutName + ".json",
-      "/usr/share/magic-keyboard/layouts/" + layoutName + ".json"};
+  std::string relPath = "magic-keyboard/layouts/" + layoutName + ".json";
+  std::string foundPath = findDataFile(relPath);
 
-  std::ifstream f;
-  std::string foundPath;
-  for (const auto &p : searchPaths) {
-    f.open(p);
-    if (f.is_open()) {
-      foundPath = p;
-      break;
-    }
-  }
-
-  if (!f.is_open()) {
-    MKLOG(Error) << "Failed to find layout: " << layoutName;
+  if (foundPath.empty()) {
+    std::string roots;
+    for (const auto &d : dataDirs())
+      roots += d + (d == dataDirs().back() ? "" : ", ");
+    MKLOG(Error) << "Failed to find layout: " << relPath
+                 << " (searched in roots: [" << roots << "])";
     return;
   }
 
   MKLOG(Info) << "Loading layout from: " << foundPath;
 
+  std::ifstream f(foundPath);
+  if (!f.is_open()) {
+    MKLOG(Error) << "Failed to open layout file: " << foundPath;
+    return;
+  }
   std::string content((std::istreambuf_iterator<char>(f)),
                       std::istreambuf_iterator<char>());
 
@@ -843,6 +840,29 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
       write(clientFd, ack.c_str(), ack.size());
     }
   } else if (line.find("\"type\":\"swipe_path\"") != std::string::npos) {
+    // Extract sequence number if present using a more robust search
+    long long seq_num = 0;
+    size_t seq_key_pos = line.find("\"seq\":");
+    if (seq_key_pos != std::string::npos) {
+      size_t val_start = seq_key_pos + 6;
+      while (val_start < line.size() &&
+             (std::isspace(line[val_start]) || line[val_start] == ':'))
+        val_start++;
+
+      size_t val_end = val_start;
+      while (val_end < line.size() && std::isdigit(line[val_end]))
+        val_end++;
+
+      if (val_end > val_start) {
+        try {
+          seq_num = std::stoll(line.substr(val_start, val_end - val_start));
+        } catch (...) {
+          MKLOG(Error) << "Failed to parse seq value";
+        }
+      }
+    }
+    // seq_num echoed in swipe_keys/candidates responses below
+
     // Parse points
     std::vector<Point> path;
     size_t pts_pos = line.find("\"points\":[");
@@ -873,12 +893,10 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
 
       auto candidates = generateCandidates(keysString, path.size());
 
-      // Logging is handled inside generateCandidates (v0.2.3.1 spec)
-      // but we add the SwipeMap style one too if needed.
-      // Spec says: SwipeCand ...
-
-      // Send keys for debug highlight
-      std::string msgKeys = "{\"type\":\"swipe_keys\",\"keys\":[";
+      // Send keys for debug highlight with sequence echo
+      std::string msgKeys =
+          "{\"type\":\"swipe_keys\",\"seq\":" + std::to_string(seq_num) +
+          ",\"keys\":[";
       for (size_t i = 0; i < seq.size(); ++i) {
         msgKeys += "\"" + seq[i] + "\"";
         if (i < seq.size() - 1)
@@ -887,8 +905,10 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
       msgKeys += "]}\n";
       sendToUI(msgKeys);
 
-      // Send candidates
-      std::string msgCands = "{\"type\":\"swipe_candidates\",\"candidates\":[";
+      // Send candidates with sequence echo
+      std::string msgCands =
+          "{\"type\":\"swipe_candidates\",\"seq\":" + std::to_string(seq_num) +
+          ",\"candidates\":[";
       for (size_t i = 0; i < candidates.size(); ++i) {
         msgCands += "{\"w\":\"" + candidates[i].word + "\"}";
         if (i < candidates.size() - 1)
@@ -1086,23 +1106,21 @@ void MagicKeyboardEngine::loadDictionary() {
     for (int j = 0; j < 26; ++j)
       buckets_[i][j].clear();
 
-  std::vector<std::string> searchPaths = {
-      "data/dict/", "/usr/local/share/magic-keyboard/dict/",
-      "/usr/share/magic-keyboard/dict/"};
+  std::string wordRelPath = "magic-keyboard/dict/words.txt";
+  std::string foundWordPath = findDataFile(wordRelPath);
 
-  std::string wordPath, freqPath;
-  for (const auto &p : searchPaths) {
-    if (std::ifstream(p + "words.txt").is_open()) {
-      wordPath = p + "words.txt";
-      freqPath = p + "freq.tsv";
-      break;
-    }
-  }
-
-  if (wordPath.empty()) {
-    MKLOG(Error) << "Dictionary not found";
+  if (foundWordPath.empty()) {
+    std::string roots;
+    for (const auto &d : dataDirs())
+      roots += d + (d == dataDirs().back() ? "" : ", ");
+    MKLOG(Error) << "Dictionary not found: " << wordRelPath
+                 << " (searched in roots: [" << roots << "])";
     return;
   }
+
+  std::string wordPath = foundWordPath;
+  std::string freqPath =
+      wordPath.substr(0, wordPath.find_last_of("\\/")) + "/freq.tsv";
 
   MKLOG(Info) << "Loading dictionary from: " << wordPath;
 
@@ -1258,6 +1276,47 @@ double MagicKeyboardEngine::scoreCandidate(const std::string &keys,
 
   // Final formula: score = -2.2*edit + 1.0*bigrams + 0.8*freqScore
   return -2.2 * dist + 1.0 * overlaps + 0.8 * freqScore;
+}
+
+std::vector<std::string> MagicKeyboardEngine::dataDirs() const {
+  std::vector<std::string> dirs;
+
+  // 1. XDG_DATA_HOME (default ~/.local/share)
+  const char *xdgDataHome = std::getenv("XDG_DATA_HOME");
+  if (xdgDataHome && *xdgDataHome) {
+    dirs.push_back(xdgDataHome);
+  } else {
+    const char *home = std::getenv("HOME");
+    if (home && *home) {
+      dirs.push_back(std::string(home) + "/.local/share");
+    }
+  }
+
+  // 2. XDG_DATA_DIRS (default /usr/local/share:/usr/share)
+  const char *xdgDataDirs = std::getenv("XDG_DATA_DIRS");
+  std::string dataDirsStr = (xdgDataDirs && *xdgDataDirs)
+                                ? xdgDataDirs
+                                : "/usr/local/share:/usr/share";
+
+  size_t start = 0, end;
+  while ((end = dataDirsStr.find(':', start)) != std::string::npos) {
+    dirs.push_back(dataDirsStr.substr(start, end - start));
+    start = end + 1;
+  }
+  dirs.push_back(dataDirsStr.substr(start));
+
+  return dirs;
+}
+
+std::string
+MagicKeyboardEngine::findDataFile(const std::string &relPath) const {
+  for (const auto &dir : dataDirs()) {
+    std::string fullPath = dir + "/" + relPath;
+    if (std::ifstream(fullPath).is_open()) {
+      return fullPath;
+    }
+  }
+  return "";
 }
 
 } // namespace magickeyboard

@@ -431,4 +431,33 @@ Window {
             }
         }
     }
+
+    // Manual Toggle Button (Top-Right)
+    Rectangle {
+        id: toggleButton
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 12
+        width: 50; height: 26
+        radius: 4
+        color: toggleMouse.pressed ? "#444" : "#ff4757"
+        border.color: "white"
+        border.width: 1
+        opacity: 0.9
+        z: 999 
+
+        Text {
+            anchors.centerIn: parent
+            text: bridge.state === KeyboardBridge.Hidden ? "Show" : "Hide"
+            color: "white"
+            font.pixelSize: 11
+            font.bold: true
+        }
+
+        MouseArea {
+            id: toggleMouse
+            anchors.fill: parent
+            onClicked: bridge.toggleVisibility()
+        }
+    }
 }
