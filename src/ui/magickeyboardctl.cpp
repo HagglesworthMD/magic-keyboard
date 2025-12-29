@@ -81,7 +81,10 @@ int main(int argc, char *argv[]) {
   struct pollfd pfd;
   pfd.fd = fd;
   pfd.events = POLLIN;
-  if (poll(&pfd, 1, 100) > 0) {
+  int pr = poll(&pfd, 1, 100);
+  if (pr < 0) {
+    perror("poll");
+  } else if (pr > 0) {
     char buf[128];
     ssize_t n = read(fd, buf, sizeof(buf) - 1);
     if (n > 0) {

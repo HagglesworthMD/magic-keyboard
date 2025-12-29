@@ -5,6 +5,7 @@
 
 #include <QDebug>
 #include <QGuiApplication>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -18,6 +19,7 @@
 #include "protocol.h"
 #include <QElapsedTimer>
 #include <algorithm>
+#include <cmath>
 
 class KeyboardBridge : public QObject {
   Q_OBJECT
@@ -195,146 +197,160 @@ private slots:
       buffer_.remove(0, idx + 1);
 
       QString msg = QString::fromUtf8(line).trimmed();
+      QJsonDocument doc = QJsonDocument::fromJson(line);
+      QJsonObject obj;
+      if (doc.isObject())
+        obj = doc.object();
 
-      if (msg.contains("\"type\":\"show\"") ||
-          msg.contains("\"type\":\"ui_show\"")) {
-        qDebug() << "Received: show -> Passive";
-        setState(Passive, "ipc_show"); // Focus events default to Passive
-      } else if (msg.contains("\"type\":\"hide\"") ||
-                 msg.contains("\"type\":\"ui_hide\"")) {
-        qDebug() << "Received: hide -> Hidden";
-        setState(Hidden, "ipc_hide");
-      } else if (msg.contains("\"type\":\"ui_toggle\"")) {
-        // Debounce toggles (100ms)
-        if (lastToggleTimer_.elapsed() < 100) {
-          qDebug() << "Ignoring rapid toggle (<100ms)";
+      if (obj.value("type").toString() == "ui_intent") {
+        if (state_ == Hidden) {
+          qDebug() << "Ignored ui_intent (Hidden state)";
         } else {
-          lastToggleTimer_.restart();
-          // Log rate limiting logic inherited from Polish
-          toggleCount_++;
-          if (toggleLogTimer_.elapsed() >= 1000) {
-            // New window - emit summary if we had multiple in last window
-            if (toggleCount_ > 1) {
-              qDebug() << "Accepted toggle x" << toggleCount_ << " in last 1s";
-            } else {
+          QString intent = obj.value("intent").toString();
+          if (intent == "key") {
+            QString val = obj.value("value").toString();
+            if (!val.isEmpty()) {
+              qDebug() << "ui_intent intent=key value=" << val;
+              sendKey(val);
+            }
+          } else if (intent == "action") {
+            QString val = obj.value("value").toString();
+            if (!val.isEmpty()) {
+              qDebug() << "ui_intent intent=action value=" << val;
+              sendAction(val);
+            }
+          } else if (intent == "swipe") {
+            QString dir = obj.value("dir").toString().toLower();
+
+            // Robust mag parsing: handle numeric or string-quoted numeric
+            double mag = 1.0;
+            QJsonValue vmag = obj.value("mag");
+            if (vmag.isDouble()) {
+              mag = vmag.toDouble();
+            } else if (vmag.isString()) {
+              bool ok = false;
+              double v = vmag.toString().toDouble(&ok);
+              if (ok)
+                mag = v;
+            }
+
+            // Harden mag: handle NaN/Inf and clamp to safe range
+            if (!std::isfinite(mag))
+              mag = 1.0;
+            mag = std::clamp(mag, 0.1, 3.0);
+
+            double len = 100.0 * mag;
+            double dx = 0, dy = 0;
+            if (dir == "left")
+              dx = -len;
+            else if (dir == "right")
+              dx = len;
+            else if (dir == "up")
+              dy = -len;
+            else if (dir == "down")
+              dy = len;
+            else {
+              qWarning() << "Ignored ui_intent swipe: unknown dir =" << dir;
+              goto skip_msg;
+            }
+
+            QVariantList path;
+            path << QVariantMap{{"x", 0.0}, {"y", 0.0}};
+            path << QVariantMap{{"x", dx}, {"y", dy}};
+            sendSwipePath(path);
+          }
+        }
+      } else {
+        // Handle other message types via JSON or substring fallback
+        QString type = obj.value("type").toString();
+        if (type == "ui_show" || type == "show" ||
+            msg.contains("\"type\":\"show\"") ||
+            msg.contains("\"type\":\"ui_show\"")) {
+          qDebug() << "Received: show -> Passive";
+          setState(Passive, "ipc_show");
+        } else if (type == "ui_hide" || type == "hide" ||
+                   msg.contains("\"type\":\"hide\"") ||
+                   msg.contains("\"type\":\"ui_hide\"")) {
+          qDebug() << "Received: hide -> Hidden";
+          setState(Hidden, "ipc_hide");
+        } else if (type == "ui_toggle" ||
+                   msg.contains("\"type\":\"ui_toggle\"")) {
+          if (lastToggleTimer_.elapsed() < 100) {
+            qDebug() << "Ignoring rapid toggle (<100ms)";
+          } else {
+            lastToggleTimer_.restart();
+            toggleCount_++;
+            if (toggleLogTimer_.elapsed() >= 1000) {
+              if (toggleCount_ > 1)
+                qDebug() << "Accepted toggle x" << toggleCount_
+                         << " in last 1s";
+              else
+                qDebug() << "Accepted toggle (fd" << socket_->socketDescriptor()
+                         << ")";
+              toggleLogTimer_.restart();
+              toggleCount_ = 0;
+            } else if (toggleCount_ == 1) {
               qDebug() << "Accepted toggle (fd" << socket_->socketDescriptor()
                        << ")";
             }
-            toggleLogTimer_.restart();
-            toggleCount_ = 0;
-          } else if (toggleCount_ == 1) {
-            // First toggle in new window - log immediately
-            qDebug() << "Accepted toggle (fd" << socket_->socketDescriptor()
-                     << ")";
+            if (state_ == Hidden)
+              setState(Active, "ipc_toggle");
+            else
+              setState(Hidden, "ipc_toggle");
           }
-          // else: mid-window toggle, will be counted in summary
-
-          // Toggle logic: Hidden -> Active (Manual intention), Visible ->
-          // Hidden
-          if (state_ == Hidden) {
-            setState(Active,
-                     "ipc_toggle"); // Manual toggle implies active usage
+        } else if (type == "swipe_keys" ||
+                   msg.contains("\"type\":\"swipe_keys\"")) {
+          QStringList keys;
+          QJsonValue vkeys = obj.value("keys");
+          if (vkeys.isArray()) {
+            for (const auto &v : vkeys.toArray())
+              keys << v.toString();
           } else {
-            setState(Hidden, "ipc_toggle");
+            // Legacy/Robust fallback logic
+            int arrKeyPos = msg.indexOf("\"keys\":[");
+            if (arrKeyPos >= 0) {
+              int arrStart = arrKeyPos + 8;
+              int arrEnd = msg.indexOf("]", arrStart);
+              if (arrEnd > arrStart) {
+                QString content = msg.mid(arrStart, arrEnd - arrStart);
+                for (auto &item : content.split(",", Qt::SkipEmptyParts))
+                  keys << item.trimmed().remove("\"");
+              }
+            }
           }
-        }
-      } else if (msg.contains("\"type\":\"ui_intent\"")) {
-        QJsonDocument doc = QJsonDocument::fromJson(msg.toUtf8());
-        if (doc.isNull() || !doc.isObject()) {
-          qWarning() << "Malformed ui_intent JSON:" << msg;
-        } else {
-          QJsonObject obj = doc.object();
-          if (state_ == Hidden) {
-            qDebug() << "Ignored ui_intent (Hidden state)";
+          qDebug() << "Received swipe_keys count=" << keys.size();
+          emit swipeKeysReceived(keys);
+        } else if (type == "swipe_candidates" ||
+                   msg.contains("\"type\":\"swipe_candidates\"")) {
+          QStringList words;
+          QJsonValue vcands = obj.value("candidates");
+          if (vcands.isArray()) {
+            for (const auto &v : vcands.toArray())
+              words << v.toObject().value("w").toString();
           } else {
-            QString intent = obj.value("intent").toString();
-            if (intent == "key") {
-              QString val = obj.value("value").toString();
-              if (!val.isEmpty())
-                sendKey(val);
-            } else if (intent == "action") {
-              QString val = obj.value("value").toString();
-              if (!val.isEmpty())
-                sendAction(val);
-            } else if (intent == "swipe") {
-              QString dir = obj.value("dir").toString().toLower();
-
-              // Robust mag parsing: handle numeric or string-quoted numeric
-              double mag = 1.0;
-              QJsonValue vmag = obj.value("mag");
-              if (vmag.isDouble()) {
-                mag = vmag.toDouble();
-              } else if (vmag.isString()) {
-                bool ok = false;
-                double v = vmag.toString().toDouble(&ok);
-                if (ok)
-                  mag = v;
+            // Legacy fallback
+            int arrStart = msg.indexOf("\"candidates\":[");
+            if (arrStart >= 0) {
+              arrStart += 14;
+              int arrEnd = msg.indexOf("]", arrStart);
+              if (arrEnd > arrStart) {
+                QString content = msg.mid(arrStart, arrEnd - arrStart);
+                int wPos = 0;
+                while ((wPos = content.indexOf("\"w\":\"", wPos)) >= 0) {
+                  int wStart = wPos + 5;
+                  int wEnd = content.indexOf("\"", wStart);
+                  if (wEnd > wStart)
+                    words << content.mid(wStart, wEnd - wStart);
+                  wPos = wEnd;
+                }
               }
-
-              // Clamp mag to safe range 0.1..3.0
-              mag = std::max(0.1, std::min(3.0, mag));
-
-              double len = 100.0 * mag;
-              double dx = 0, dy = 0;
-              if (dir == "left")
-                dx = -len;
-              else if (dir == "right")
-                dx = len;
-              else if (dir == "up")
-                dy = -len;
-              else if (dir == "down")
-                dy = len;
-              else {
-                qWarning() << "Ignored ui_intent swipe: unknown dir =" << dir;
-                return;
-              }
-
-              QVariantList path;
-              path << QVariantMap{{"x", 0.0}, {"y", 0.0}};
-              path << QVariantMap{{"x", dx}, {"y", dy}};
-              sendSwipePath(path);
             }
           }
+          qDebug() << "Received swipe_candidates count=" << words.size();
+          emit swipeCandidatesReceived(words);
         }
-      } else if (msg.contains("\"type\":\"swipe_keys\"")) {
-        QStringList keys;
-        int arrKeyPos = msg.indexOf("\"keys\":[");
-        if (arrKeyPos >= 0) {
-          int arrStart = arrKeyPos + 8;
-          int arrEnd = msg.indexOf("]", arrStart);
-          if (arrEnd > arrStart) {
-            QString content = msg.mid(arrStart, arrEnd - arrStart);
-            QStringList items = content.split(",", Qt::SkipEmptyParts);
-            for (auto &item : items) {
-              keys << item.trimmed().remove("\"");
-            }
-          }
-        }
-        qDebug() << "Received swipe_keys count=" << keys.size();
-        emit swipeKeysReceived(keys);
-      } else if (msg.contains("\"type\":\"swipe_candidates\"")) {
-        QStringList words;
-        int arrStart = msg.indexOf("\"candidates\":[");
-        if (arrStart >= 0) {
-          arrStart += 14;
-          int arrEnd = msg.indexOf("]", arrStart);
-          if (arrEnd > arrStart) {
-            QString content = msg.mid(arrStart, arrEnd - arrStart);
-            // Content is list of {"w":"..."}
-            int wPos = 0;
-            while ((wPos = content.indexOf("\"w\":\"", wPos)) >= 0) {
-              int wStart = wPos + 5;
-              int wEnd = content.indexOf("\"", wStart);
-              if (wEnd > wStart) {
-                words << content.mid(wStart, wEnd - wStart);
-              }
-              wPos = wEnd;
-            }
-          }
-        }
-        qDebug() << "Received swipe_candidates count=" << words.size();
-        emit swipeCandidatesReceived(words);
       }
+    skip_msg:;
     }
   }
 
