@@ -154,15 +154,22 @@ Window {
             ctx.clearRect(0, 0, width, height);
             if (root.currentPath.length < 2) return;
             
+            // Guard against malformed path entries
+            var first = root.currentPath[0];
+            if (!first || first.wx === undefined) return;
+            
             ctx.strokeStyle = "#88c0d0"; // Theme neutral
             ctx.lineWidth = 3;
             ctx.lineCap = "round";
             ctx.lineJoin = "round";
             
             ctx.beginPath();
-            ctx.moveTo(root.currentPath[0].wx, root.currentPath[0].wy);
+            ctx.moveTo(first.wx, first.wy);
             for (var i = 1; i < root.currentPath.length; i++) {
-                ctx.lineTo(root.currentPath[i].wx, root.currentPath[i].wy);
+                var pt = root.currentPath[i];
+                if (pt && pt.wx !== undefined) {
+                    ctx.lineTo(pt.wx, pt.wy);
+                }
             }
             ctx.stroke();
         }
