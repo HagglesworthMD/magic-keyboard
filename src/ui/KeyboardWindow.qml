@@ -1,17 +1,24 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
+import MagicKeyboard 1.0
 
 Window {
     id: root
     width: 800; height: 320 // Slightly taller for candidate bar
-    visible: true   // Start visible when manually launched
+    // Visibility is controlled by main.cpp -> bridge.state
+    
+    // Passive Mode: Translucent when just focused, Opaque when active
+    opacity: bridge.state === KeyboardBridge.Passive ? 0.8 : 1.0
+    
+    Behavior on opacity { NumberAnimation { duration: 150 } }
+
     color: "#1a1a2e"
     title: "Magic Keyboard"
     
     property bool shiftActive: false
     
-    // Swipe state
+    // Swipe state ... (unchanged)
     property var currentPath: []
     property bool isSwiping: false
     property point startPos: Qt.point(0, 0)
@@ -50,7 +57,7 @@ Window {
         context: Qt.WindowShortcut
         onActivated: {
             console.log("Escape safety hatch (Shortcut) triggered")
-            bridge.visible = false
+            bridge.requestState(KeyboardBridge.Hidden, "escape_shortcut")
         }
     }
 
@@ -61,7 +68,7 @@ Window {
         Keys.onPressed: (event) => {
             if (event.key === Qt.Key_Escape && event.modifiers === Qt.NoModifier) {
                 console.log("Escape safety hatch (Keys) triggered")
-                bridge.visible = false
+                bridge.requestState(KeyboardBridge.Hidden, "escape_key")
                 event.accepted = true
             }
         }

@@ -17,9 +17,16 @@
 
 class KeyboardBridge : public QObject {
   Q_OBJECT
-  Q_PROPERTY(bool visible READ isVisible WRITE setVisible NOTIFY visibleChanged)
+  Q_PROPERTY(State state READ state NOTIFY stateChanged)
 
 public:
+  enum State {
+    Hidden,
+    Passive, // Visible but low profile (e.g. from focus)
+    Active   // Fully interactive (user clicked/typed)
+  };
+  Q_ENUM(State)
+
   explicit KeyboardBridge(QObject *parent = nullptr) : QObject(parent) {
     socket_ = new QLocalSocket(this);
     reconnectTimer_ = new QTimer(this);
@@ -60,11 +67,22 @@ public:
             &KeyboardBridge::tryConnect);
   }
 
-  bool isVisible() const { return visible_; }
-  void setVisible(bool v) {
-    if (visible_ != v) {
-      visible_ = v;
-      emit visibleChanged();
+  State state() const { return state_; }
+
+  // Helper for QML to request state changes
+  Q_INVOKABLE void requestState(State newState, const QString &reason) {
+    setState(newState, reason);
+  }
+
+  void setState(State s, const QString &reason) {
+    if (state_ != s) {
+      qDebug() << "[UI] State transition:" << state_ << "->" << s
+               << "reason=" << reason;
+      state_ = s;
+      emit stateChanged();
+    } else {
+      // Optional: log redundant transitions at debug level if needed
+      // qDebug() << "[UI] Redundant transition to" << s << "reason=" << reason;
     }
   }
 
@@ -72,6 +90,10 @@ public slots:
   void connectToEngine() { tryConnect(); }
 
   void sendKey(const QString &key) {
+    // Any interaction upgrades to Active
+    if (state_ == Passive)
+      setState(Active, "user_key");
+
     if (socket_->state() != QLocalSocket::ConnectedState)
       return;
     QString msg = QString("{\"type\":\"key\",\"text\":\"%1\"}\n").arg(key);
@@ -80,6 +102,9 @@ public slots:
   }
 
   void sendAction(const QString &action) {
+    if (state_ == Passive)
+      setState(Active, "user_action");
+
     if (socket_->state() != QLocalSocket::ConnectedState)
       return;
     QString msg =
@@ -89,6 +114,9 @@ public slots:
   }
 
   void sendSwipePath(const QVariantList &path) {
+    if (state_ == Passive)
+      setState(Active, "user_swipe");
+
     if (socket_->state() != QLocalSocket::ConnectedState)
       return;
 
@@ -152,21 +180,19 @@ private slots:
 
       if (msg.contains("\"type\":\"show\"") ||
           msg.contains("\"type\":\"ui_show\"")) {
-        qDebug() << "Received: show";
-        setVisible(true);
-        emit showKeyboard();
+        qDebug() << "Received: show -> Passive";
+        setState(Passive, "ipc_show"); // Focus events default to Passive
       } else if (msg.contains("\"type\":\"hide\"") ||
                  msg.contains("\"type\":\"ui_hide\"")) {
-        qDebug() << "Received: hide";
-        setVisible(false);
-        emit hideKeyboard();
+        qDebug() << "Received: hide -> Hidden";
+        setState(Hidden, "ipc_hide");
       } else if (msg.contains("\"type\":\"ui_toggle\"")) {
         // Debounce toggles (100ms)
         if (lastToggleTimer_.elapsed() < 100) {
           qDebug() << "Ignoring rapid toggle (<100ms)";
         } else {
           lastToggleTimer_.restart();
-          // Rate-limit toggle logs: count per second, emit summary
+          // Log rate limiting logic inherited from Polish
           toggleCount_++;
           if (toggleLogTimer_.elapsed() >= 1000) {
             // New window - emit summary if we had multiple in last window
@@ -185,12 +211,14 @@ private slots:
           }
           // else: mid-window toggle, will be counted in summary
 
-          bool next = !isVisible();
-          setVisible(next);
-          if (next)
-            emit showKeyboard();
-          else
-            emit hideKeyboard();
+          // Toggle logic: Hidden -> Active (Manual intention), Visible ->
+          // Hidden
+          if (state_ == Hidden) {
+            setState(Active,
+                     "ipc_toggle"); // Manual toggle implies active usage
+          } else {
+            setState(Hidden, "ipc_toggle");
+          }
         }
       } else if (msg.contains("\"type\":\"swipe_keys\"")) {
         QStringList keys;
@@ -236,6 +264,9 @@ private slots:
 
 public slots:
   void commitCandidate(const QString &word) {
+    if (state_ == Passive)
+      setState(Active, "user_candidate");
+
     if (socket_->state() != QLocalSocket::ConnectedState)
       return;
     QString msg =
@@ -252,7 +283,7 @@ private:
   QLocalSocket *socket_;
   QTimer *reconnectTimer_;
   QByteArray buffer_;
-  bool visible_ = false;
+  State state_ = Hidden; // Replaces 'bool visible_'
   bool reconnecting_ = false;
   int reconnectDelayMs_ = kInitialReconnectDelayMs;
   QElapsedTimer lastToggleTimer_;
@@ -260,9 +291,7 @@ private:
   int toggleCount_ = 0;          // Toggles in current 1s window
 
 signals:
-  void visibleChanged();
-  void showKeyboard();
-  void hideKeyboard();
+  void stateChanged();
   void swipeKeysReceived(const QStringList &keys);
   void swipeCandidatesReceived(const QStringList &candidates);
 };
@@ -277,6 +306,8 @@ int main(int argc, char *argv[]) {
            << QString::fromStdString(magickeyboard::ipc::getSocketPath());
 
   KeyboardBridge bridge;
+
+  qmlRegisterType<KeyboardBridge>("MagicKeyboard", 1, 0, "KeyboardBridge");
 
   QQmlApplicationEngine engine;
   engine.rootContext()->setContextProperty("bridge", &bridge);
@@ -308,18 +339,25 @@ int main(int argc, char *argv[]) {
             window->setPosition((r.width() - w) / 2, r.height() - h - 20);
           }
 
-          QObject::connect(&bridge, &KeyboardBridge::showKeyboard, window,
-                           [window]() { window->show(); });
-          QObject::connect(&bridge, &KeyboardBridge::hideKeyboard, window,
-                           [window]() { window->hide(); });
+          // State-driven visibility
+          QObject::connect(&bridge, &KeyboardBridge::stateChanged, window,
+                           [&bridge, window]() {
+                             if (bridge.state() == KeyboardBridge::Hidden) {
+                               window->hide();
+                             } else {
+                               window->show();
+                             }
+                           });
 
-          // Show on start (manual launch)
-          window->show();
+          // Allow QML to initialize correctly
+          if (bridge.state() != KeyboardBridge::Hidden) {
+            window->show();
+          }
 
           // Connect to engine
           bridge.connectToEngine();
 
-          qDebug() << "Window ready and visible";
+          qDebug() << "Window ready and managed by UiState";
         }
       },
       Qt::QueuedConnection);
