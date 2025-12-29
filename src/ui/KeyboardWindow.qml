@@ -44,6 +44,29 @@ Window {
         }
     }
 
+    // Safety Hatch: If UI accidentally grabs focus, Esc must hide it.
+    Shortcut {
+        sequence: "Escape"
+        context: Qt.WindowShortcut
+        onActivated: {
+            console.log("Escape safety hatch (Shortcut) triggered")
+            bridge.visible = false
+        }
+    }
+
+    // Redundant Safety Hatch: Raw key handler
+    Item {
+        anchors.fill: parent
+        focus: true // Ensure we get key events if window has focus
+        Keys.onPressed: (event) => {
+            if (event.key === Qt.Key_Escape && event.modifiers === Qt.NoModifier) {
+                console.log("Escape safety hatch (Keys) triggered")
+                bridge.visible = false
+                event.accepted = true
+            }
+        }
+    }
+
     function highlightKey(id, delay) {
         // This is costly O(N) but fine for debug overlay
         findAndHighlight(keysContainer, id, delay)

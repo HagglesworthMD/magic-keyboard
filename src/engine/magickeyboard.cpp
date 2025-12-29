@@ -142,7 +142,7 @@ void MagicKeyboardEngine::reset(const fcitx::InputMethodEntry &,
 }
 
 // Check if this context should show the keyboard
-// Returns: 0=no, 1=yes, sets reason string
+// Returns: 0=no, 1=yes, sets reason string (with activeIM for debugging)
 int MagicKeyboardEngine::shouldShowKeyboard(fcitx::InputContext *ic,
                                             std::string &reason) {
   if (!ic) {
@@ -155,13 +155,31 @@ int MagicKeyboardEngine::shouldShowKeyboard(fcitx::InputContext *ic,
   bool isOurs = (entry && entry->addon() == "magickeyboard");
 
   // Fallback only if entry is null
+  std::string globalIM = instance_->currentInputMethod();
   if (!entry) {
-    std::string globalIM = instance_->currentInputMethod();
     isOurs = (globalIM == "magic-keyboard");
   }
 
   if (!isOurs) {
-    reason = "other-im";
+    // Include both addon provider and specific IM identifier for actionable
+    // debugging
+    std::string addonName = "null-entry";
+    std::string imIdent = "null-entry";
+    if (entry) {
+      addonName = entry->addon().empty() ? "no-addon" : entry->addon();
+      // Prefer uniqueName; fallback to name() if empty
+      imIdent = entry->uniqueName();
+      if (imIdent.empty()) {
+        imIdent = entry->name();
+      }
+      if (imIdent.empty()) {
+        imIdent = "no-name";
+      }
+    } else if (!globalIM.empty()) {
+      addonName = "global-fallback";
+      imIdent = globalIM;
+    }
+    reason = "other-im addon=" + addonName + " im=" + imIdent;
     return 0;
   }
 

@@ -12,7 +12,10 @@ X-GNOME-Autostart-enabled=true
 X-KDE-autostart-phase=2
 X-KDE-autostart-after=panel
 
-# Start only in Desktop Mode (not Game Mode)
+# OnlyShowIn=KDE: Intentional for SteamOS. The UI should only autostart in
+# Desktop Mode (KDE Plasma), NOT in Game Mode (gamescope/Steam). This prevents
+# the keyboard UI from consuming resources when the user is gaming. The fcitx5
+# engine itself autostarts cross-DE (see ~/.config/autostart/fcitx5.desktop).
 OnlyShowIn=KDE;
 
 # Don't show in application launchers (it's a background service)

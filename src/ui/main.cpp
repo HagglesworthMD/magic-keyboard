@@ -25,6 +25,7 @@ public:
     reconnectTimer_ = new QTimer(this);
     reconnectTimer_->setSingleShot(true);
     lastToggleTimer_.start();
+    toggleLogTimer_.start();
 
     connect(socket_, &QLocalSocket::connected, this, [this]() {
       qDebug() << "Connected to engine";
@@ -165,8 +166,25 @@ private slots:
           qDebug() << "Ignoring rapid toggle (<100ms)";
         } else {
           lastToggleTimer_.restart();
-          qDebug() << "Accepted toggle (fd" << socket_->socketDescriptor()
-                   << ")";
+          // Rate-limit toggle logs: count per second, emit summary
+          toggleCount_++;
+          if (toggleLogTimer_.elapsed() >= 1000) {
+            // New window - emit summary if we had multiple in last window
+            if (toggleCount_ > 1) {
+              qDebug() << "Accepted toggle x" << toggleCount_ << " in last 1s";
+            } else {
+              qDebug() << "Accepted toggle (fd" << socket_->socketDescriptor()
+                       << ")";
+            }
+            toggleLogTimer_.restart();
+            toggleCount_ = 0;
+          } else if (toggleCount_ == 1) {
+            // First toggle in new window - log immediately
+            qDebug() << "Accepted toggle (fd" << socket_->socketDescriptor()
+                     << ")";
+          }
+          // else: mid-window toggle, will be counted in summary
+
           bool next = !isVisible();
           setVisible(next);
           if (next)
@@ -238,6 +256,8 @@ private:
   bool reconnecting_ = false;
   int reconnectDelayMs_ = kInitialReconnectDelayMs;
   QElapsedTimer lastToggleTimer_;
+  QElapsedTimer toggleLogTimer_; // For rate-limiting toggle logs
+  int toggleCount_ = 0;          // Toggles in current 1s window
 
 signals:
   void visibleChanged();
