@@ -161,6 +161,7 @@ public slots:
                       .arg(pointsJson);
     socket_->write(msg.toUtf8());
     socket_->flush();
+    lastSwipeSentTimer_.restart();
     qDebug() << "Sent swipe_path layout=qwerty points=" << path.size();
   }
 
@@ -324,8 +325,10 @@ private slots:
                        << ")";
             }
             if (state_ == Hidden)
-              setState(Active, "ipc_toggle");
-            else
+              setState(Passive, "ipc_toggle");
+            else if (state_ == Active)
+              setState(Passive, "ipc_toggle");
+            else // Passive
               setState(Hidden, "ipc_toggle");
           }
         } else if (type == "swipe_keys" ||
@@ -348,7 +351,14 @@ private slots:
               }
             }
           }
-          qDebug() << "Received swipe_keys count=" << keys.size();
+          if (lastSwipeSentTimer_.isValid()) {
+            qDebug() << "Received swipe_keys count=" << keys.size()
+                     << "latency_ms=" << lastSwipeSentTimer_.elapsed()
+                     << "keys=" << keys.join("-");
+            lastSwipeSentTimer_.invalidate();
+          } else {
+            qDebug() << "Received swipe_keys count=" << keys.size();
+          }
           emit swipeKeysReceived(keys);
         } else if (type == "swipe_candidates" ||
                    msg.contains("\"type\":\"swipe_candidates\"")) {
@@ -413,6 +423,7 @@ private:
   QElapsedTimer lastToggleTimer_;
   QElapsedTimer toggleLogTimer_;     // For rate-limiting toggle logs
   QElapsedTimer lastPromotionTimer_; // For debouncing promotions
+  QElapsedTimer lastSwipeSentTimer_; // For latency tracking
   int toggleCount_ = 0;              // Toggles in current 1s window
 
 signals:
