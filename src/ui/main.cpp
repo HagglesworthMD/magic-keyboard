@@ -197,10 +197,16 @@ private slots:
       buffer_.remove(0, idx + 1);
 
       QString msg = QString::fromUtf8(line).trimmed();
-      QJsonDocument doc = QJsonDocument::fromJson(line);
+      QJsonParseError err;
+      QJsonDocument doc = QJsonDocument::fromJson(line, &err);
       QJsonObject obj;
-      if (doc.isObject())
+      if (doc.isObject()) {
         obj = doc.object();
+      } else if (msg.startsWith('{')) {
+        qWarning() << "IPC JSON parse error:" << err.errorString()
+                   << "at offset" << err.offset
+                   << "Line snippet:" << msg.left(64);
+      }
 
       if (obj.value("type").toString() == "ui_intent") {
         if (state_ == Hidden) {
@@ -251,7 +257,7 @@ private slots:
               dy = len;
             else {
               qWarning() << "Ignored ui_intent swipe: unknown dir =" << dir;
-              goto skip_msg;
+              continue;
             }
 
             QVariantList path;
@@ -325,8 +331,12 @@ private slots:
           QStringList words;
           QJsonValue vcands = obj.value("candidates");
           if (vcands.isArray()) {
-            for (const auto &v : vcands.toArray())
-              words << v.toObject().value("w").toString();
+            for (const auto &v : vcands.toArray()) {
+              if (v.isObject())
+                words << v.toObject().value("w").toString();
+              else if (v.isString())
+                words << v.toString();
+            }
           } else {
             // Legacy fallback
             int arrStart = msg.indexOf("\"candidates\":[");
@@ -350,7 +360,6 @@ private slots:
           emit swipeCandidatesReceived(words);
         }
       }
-    skip_msg:;
     }
   }
 
