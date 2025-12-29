@@ -29,18 +29,51 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     std::string type = argv[2];
-    std::string val = argv[3];
-    if (type == "key") {
-      msg = "{\"type\":\"ui_intent\",\"intent\":\"key\",\"value\":\"" + val +
-            "\"}\n";
-    } else if (type == "action") {
-      msg = "{\"type\":\"ui_intent\",\"intent\":\"action\",\"value\":\"" + val +
-            "\"}\n";
+    if (type == "key" || type == "action") {
+      if (argc < 4) {
+        std::cerr << "Usage: magickeyboardctl ui-intent " << type << " <value>"
+                  << std::endl;
+        return 1;
+      }
+      std::string val = argv[3];
+      msg = "{\"type\":\"ui_intent\",\"intent\":\"" + type + "\",\"value\":\"" +
+            val + "\"}\n";
     } else if (type == "swipe") {
-      // Swipe expects dir (val) and optional magnitude
+      if (argc < 4) {
+        std::cerr << "Usage: magickeyboardctl ui-intent swipe <dir> [mag]"
+                  << std::endl;
+        return 1;
+      }
+      std::string val = argv[3];
       std::string mag = (argc > 4) ? argv[4] : "1.0";
       msg = "{\"type\":\"ui_intent\",\"intent\":\"swipe\",\"dir\":\"" + val +
             "\",\"mag\":" + mag + "}\n";
+    } else if (type == "swipe-path") {
+      if (argc < 4) {
+        std::cerr << "Usage: magickeyboardctl ui-intent swipe-path <layout> "
+                     "<x1,y1> <x2,y2> ..."
+                  << std::endl;
+        return 1;
+      }
+      std::string layout = argv[3];
+      std::string pointsJson = "[";
+      for (int i = 4; i < argc; ++i) {
+        std::string ptStr = argv[i];
+        size_t comma = ptStr.find(',');
+        if (comma == std::string::npos) {
+          std::cerr << "Malformed point: " << ptStr << " (expected x,y)"
+                    << std::endl;
+          return 1;
+        }
+        std::string x = ptStr.substr(0, comma);
+        std::string y = ptStr.substr(comma + 1);
+        pointsJson += "{\"x\":" + x + ",\"y\":" + y + "}";
+        if (i < argc - 1)
+          pointsJson += ",";
+      }
+      pointsJson += "]";
+      msg = "{\"type\":\"ui_intent\",\"intent\":\"swipe_path\",\"layout\":\"" +
+            layout + "\",\"points\":" + pointsJson + "}\n";
     } else {
       std::cerr << "Unknown intent type: " << type << std::endl;
       return 1;

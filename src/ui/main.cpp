@@ -119,8 +119,10 @@ public slots:
     if (socket_->state() != QLocalSocket::ConnectedState)
       return;
     QString msg = QString("{\"type\":\"key\",\"text\":\"%1\"}\n").arg(key);
-    socket_->write(msg.toUtf8());
-    socket_->flush();
+    if (socket_->write(msg.toUtf8()) > 0) {
+      socket_->flush();
+      qDebug() << "Sent key text=" << key;
+    }
   }
 
   void sendAction(const QString &action) {
@@ -130,8 +132,10 @@ public slots:
       return;
     QString msg =
         QString("{\"type\":\"action\",\"action\":\"%1\"}\n").arg(action);
-    socket_->write(msg.toUtf8());
-    socket_->flush();
+    if (socket_->write(msg.toUtf8()) > 0) {
+      socket_->flush();
+      qDebug() << "Sent action type=" << action;
+    }
   }
 
   void sendSwipePath(const QVariantList &path) {
@@ -264,6 +268,26 @@ private slots:
             path << QVariantMap{{"x", 0.0}, {"y", 0.0}};
             path << QVariantMap{{"x", dx}, {"y", dy}};
             sendSwipePath(path);
+          } else if (intent == "swipe_path") {
+            QString layout = obj.value("layout").toString();
+            if (layout.isEmpty())
+              layout = "qwerty";
+            QJsonValue vpoints = obj.value("points");
+            if (vpoints.isArray()) {
+              QVariantList path;
+              for (const auto &v : vpoints.toArray()) {
+                if (v.isObject()) {
+                  QJsonObject po = v.toObject();
+                  path << QVariantMap{{"x", po.value("x").toDouble()},
+                                      {"y", po.value("y").toDouble()}};
+                }
+              }
+              if (!path.isEmpty()) {
+                qDebug() << "ui_intent intent=swipe_path layout=" << layout
+                         << "points=" << path.size();
+                sendSwipePath(path);
+              }
+            }
           }
         }
       } else {

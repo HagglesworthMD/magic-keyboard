@@ -333,9 +333,9 @@ Window {
             
             Text {
                 anchors.centerIn: parent
-                visible: root.isSwiping || root.swipeCandidates.length === 0
-                text: root.isSwiping ? "Swiping..." : (root.debugKeys.length > 0 ? root.debugKeys.join("-") : "Candidates (v0.2)")
-                color: root.isSwiping || root.debugKeys.length > 0 ? "#00d2ff" : "#555"
+                visible: root.isSwiping || (root.swipeCandidates.length === 0 && root.debugKeys.length === 0)
+                text: root.isSwiping ? "Swiping..." : "Candidates (v0.2)"
+                color: root.isSwiping ? "#00d2ff" : "#555"
                 font.pixelSize: 14
             }
 
@@ -343,27 +343,31 @@ Window {
                 anchors.fill: parent
                 anchors.margins: 4
                 spacing: 8
-                visible: !root.isSwiping && root.swipeCandidates.length > 0
+                visible: !root.isSwiping && (root.swipeCandidates.length > 0 || root.debugKeys.length > 0)
                 
                 Repeater {
-                    model: root.swipeCandidates
+                    model: root.swipeCandidates.length > 0 ? root.swipeCandidates : root.debugKeys
                     Rectangle {
                         Layout.fillHeight: true
-                        Layout.preferredWidth: 80
-                        color: candidateMa.pressed ? "#4a4a8a" : "#2a2a4a"
+                        Layout.preferredWidth: root.swipeCandidates.length > 0 ? 80 : 40
+                        color: root.swipeCandidates.length > 0 
+                               ? (candidateMa.pressed ? "#4a4a8a" : "#2a2a4a")
+                               : "#1a1a2e"
                         radius: 4
-                        border.color: "#3a3a5a"; border.width: 1
+                        border.color: root.swipeCandidates.length > 0 ? "#3a3a5a" : "#2a2a4a"
+                        border.width: 1
                         
                         Text {
                             anchors.centerIn: parent
                             text: modelData
-                            color: "#eceff4"
+                            color: root.swipeCandidates.length > 0 ? "#eceff4" : "#88c0d0"
                             font.pixelSize: 14
                         }
                         
                         MouseArea {
                             id: candidateMa
                             anchors.fill: parent
+                            enabled: root.swipeCandidates.length > 0
                             onClicked: {
                                 bridge.commitCandidate(modelData)
                                 root.swipeCandidates = []
