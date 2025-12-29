@@ -219,8 +219,8 @@ Window {
         anchors.fill: parent
         hoverEnabled: true
         
-        // Intent Router: Only process inputs if not Hidden
-        visible: bridge.state !== KeyboardBridge.Hidden 
+        // Intent Router: Input guarded by early returns in handlers
+ 
 
         onPositionChanged: (mouse) => {
             if (bridge.state === KeyboardBridge.Hidden) return
@@ -304,13 +304,7 @@ Window {
 
                     if (root.activeKey.code === "shift") {
                         root.shiftActive = !root.shiftActive
-                        // Shift doesn't promote to Active; it's a modifier
-                        // But wait, user interaction usually promotes. 
-                        // Let's stick to C++ rule: ANY sendKey promotes.
-                        // Shift keeps state passive unless we send it? 
-                        // Current logic: Shift is local UI state. 
-                        // To promote on Shift, we might want to requestState?
-                        // For now, let's allow Shift to be Passive.
+                        // Shift is UI-local modifier; does not promote state
                     } else if (root.activeKey.action !== "") {
                         bridge.sendAction(root.activeKey.action)
                     } else {

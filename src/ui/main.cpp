@@ -240,30 +240,63 @@ private slots:
           qDebug() << "Ignored ui_intent (Hidden state)";
         } else {
           // Minimal manual JSON parsing to avoid deps
-          auto getValue = [&](const QString &keyName) {
-            QString pf = "\"" + keyName + "\":\"";
+          auto getString = [&](const QString &key) -> QString {
+            QString pf = "\"" + key + "\":\"";
             int s = msg.indexOf(pf);
             if (s < 0)
               return QString();
             s += pf.length();
             int e = msg.indexOf("\"", s);
+            if (e < 0)
+              return QString();
             return msg.mid(s, e - s);
           };
 
-          QString intent = getValue("intent");
+          auto getDouble = [&](const QString &key,
+                               double defVal = 1.0) -> double {
+            QString pf = "\"" + key + "\":";
+            int s = msg.indexOf(pf);
+            if (s < 0)
+              return defVal;
+            s += pf.length();
+            // Find end of number: , or }
+            int e1 = msg.indexOf(",", s);
+            int e2 = msg.indexOf("}", s);
+            int e = (e1 == -1) ? e2 : (e2 == -1 ? e1 : std::min(e1, e2));
+            if (e < 0)
+              return defVal;
+            return msg.mid(s, e - s).toDouble();
+          };
+
+          QString intent = getString("intent");
           if (intent == "key") {
-            QString val = getValue("value");
+            QString val = getString("value");
             if (!val.isEmpty())
               sendKey(val);
           } else if (intent == "action") {
-            QString val = getValue("value");
+            QString val = getString("value");
             if (!val.isEmpty())
               sendAction(val);
           } else if (intent == "swipe") {
-            // Synthesize a dummy path to exercise the pipeline
+            QString dir = getString("dir");
+            double mag = getDouble("mag");
+            double len = 100.0 * mag;
+            double dx = 0, dy = 0;
+            if (dir == "left")
+              dx = -len;
+            else if (dir == "right")
+              dx = len;
+            else if (dir == "up")
+              dy = -len;
+            else if (dir == "down")
+              dy = len;
+            // Default to right if unknown/empty to ensure path has length
+            if (dx == 0 && dy == 0)
+              dx = 10.0;
+
             QVariantList path;
             path << QVariantMap{{"x", 0.0}, {"y", 0.0}};
-            path << QVariantMap{{"x", 10.0}, {"y", 0.0}};
+            path << QVariantMap{{"x", dx}, {"y", dy}};
             sendSwipePath(path);
           }
         }
