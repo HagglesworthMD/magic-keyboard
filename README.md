@@ -52,34 +52,32 @@ sudo steamos-readonly disable  # SteamOS only
 sudo pacman -S fcitx5 fcitx5-qt qt6-base qt6-declarative cmake ninja
 ```
 
-## Building
+## Building & Installing
 
+### Building
 ```bash
 # Configure
-cmake -S . -B build -G Ninja
+cmake -S . -B build -G Ninja -DCMAKE_INSTALL_PREFIX=/usr
 
 # Build
 cmake --build build
-
-# Install (to user prefix for development)
-cmake --install build --prefix ~/.local
 ```
+
+### Installing
+```bash
+# Install to system paths
+sudo cmake --install build
+```
+
+This will automatically install:
+- **Engine**: `/usr/lib/x86_64-linux-gnu/fcitx5/libmagickeyboard.so`
+- **Configs**: `/usr/share/fcitx5/{addon,inputmethod}/magickeyboard.conf`
+- **Binaries**: `/usr/bin/magickeyboard-{ui,ctl}`
+- **Launcher**: `/usr/share/applications/magickeyboard.desktop`
 
 ## Testing (Development)
 
-### 1. Install the addon
-
-After building, install the Fcitx5 addon to system paths:
-
-```bash
-# Install the addon library
-sudo cp build/lib/libmagickeyboard.so /usr/lib/x86_64-linux-gnu/fcitx5/
-
-# Install the addon config (note: must be named magickeyboard.conf)
-sudo cp build/src/engine/addon-magickeyboard.conf /usr/share/fcitx5/addon/magickeyboard.conf
-```
-
-### 2. Restart Fcitx5 and verify addon loads
+### 1. Restart Fcitx5 and verify addon loads
 
 ```bash
 pkill fcitx5
@@ -94,35 +92,27 @@ Loaded addon magickeyboard
 Found 1 input method(s) in addon magickeyboard
 ```
 
-### 3. Run the UI manually
+### 2. Verify UI Connection
+
+Once Fcitx5 is running, focus a text field (e.g. Kate). The engine will automatically launch the UI.
+
+Verify with logs:
+```bash
+journalctl --user -f | grep -i magic
+```
+
+Verity with process:
+```bash
+ps aux | grep magickeyboard-ui
+```
+
+### 3. Manual Control
+
+You can manually toggle the keyboard from the **KDE Application Launcher** (search for "Magic Keyboard") or via CLI:
 
 ```bash
-./build/bin/magickeyboard-ui
-```
-
-You should see:
-```
-Magic Keyboard UI starting
-Connected to engine
-Window ready, hidden until activation
-```
-
-### 4. Install the binaries and startup services
-
-```bash
-# Install binaries
-sudo cp build/lib/libmagickeyboard.so /usr/lib/x86_64-linux-gnu/fcitx5/
-sudo cp build/bin/magickeyboard-ui /usr/local/bin/
-
-# Install UI startup (KDE Autostart - Most reliable on SteamOS)
-mkdir -p ~/.config/autostart
-cp /home/deck/.config/autostart/magickeyboard-ui.desktop ~/.config/autostart/
-
-# OR Install UI as systemd user service
-mkdir -p ~/.config/systemd/user
-cp packaging/systemd/magickeyboard-ui.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now magickeyboard-ui
+# Toggle visibility
+magickeyboardctl toggle
 ```
 
 ### 5. Configure Fcitx5 (KDE System Settings)

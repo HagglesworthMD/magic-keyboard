@@ -1,24 +1,141 @@
 # Maintainer: Your Name <your@email.com>
 pkgname=magic-keyboard
-pkgver=0.1.0
+pkgver=0.3.0
 pkgrel=1
-pkgdesc="SteamOS Desktop Mode On-Screen Keyboard for KDE Plasma"
+pkgdesc="SteamOS Desktop Mode On-Screen Keyboard for KDE Plasma - Fcitx5 Input Method"
 arch=('x86_64')
 url="https://github.com/HagglesworthMD/magic-keyboard"
 license=('MIT')
-depends=('fcitx5' 'qt6-base' 'qt6-declarative')
-makedepends=('cmake' 'ninja')
+
+# Runtime dependencies
+depends=(
+    'fcitx5'
+    'fcitx5-qt'         # Qt input method module
+    'qt6-base'
+    'qt6-declarative'   # QML runtime
+)
+
+# Build dependencies
+makedepends=(
+    'cmake'
+    'ninja'
+    'qt6-tools'         # For Qt Linguist/translations
+    'fcitx5-dev'        # Fcitx5 headers (if packaged separately)
+)
+
+# Optional dependencies
+optdepends=(
+    'fcitx5-configtool: GUI configuration for input methods'
+)
+
 source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('SKIP')
+
+# Files that should be preserved on upgrade (user customizations)
+backup=(
+    'usr/local/share/magic-keyboard/layouts/qwerty.json'
+)
 
 build() {
     cmake -S "$pkgname-$pkgver" -B build \
         -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/usr
+        -DCMAKE_INSTALL_PREFIX=/usr/local
     cmake --build build
+}
+
+check() {
+    # Run tests if available
+    if [[ -f "build/CTestTestfile.cmake" ]]; then
+        cmake --build build --target test
+    fi
 }
 
 package() {
     DESTDIR="$pkgdir" cmake --install build
+    
+    # Install systemd user service template (users copy to ~/.config/systemd/user/)
+    install -Dm644 "$srcdir/$pkgname-$pkgver/packaging/systemd/magickeyboard-ui.service" \
+        "$pkgdir/usr/local/share/magic-keyboard/magickeyboard-ui.service"
+    
+    # Install autostart fallback template
+    install -Dm644 "$srcdir/$pkgname-$pkgver/packaging/autostart/magickeyboard-ui.desktop" \
+        "$pkgdir/usr/local/share/magic-keyboard/magickeyboard-ui.desktop"
+    
+    # Install verification script
+    install -Dm755 "$srcdir/$pkgname-$pkgver/packaging/scripts/magic-keyboard-verify" \
+        "$pkgdir/usr/local/bin/magic-keyboard-verify"
+    
+    # Install post-install documentation
+    install -Dm644 "$srcdir/$pkgname-$pkgver/packaging/scripts/post-install.txt" \
+        "$pkgdir/usr/local/share/doc/magic-keyboard/post-install.txt"
+    
+    # Install environment setup script
+    install -Dm644 "$srcdir/$pkgname-$pkgver/packaging/scripts/fcitx5-env.sh" \
+        "$pkgdir/usr/local/share/magic-keyboard/fcitx5-env.sh"
+}
+
+post_install() {
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║             Magic Keyboard Successfully Installed            ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "IMPORTANT: Complete these steps to finish setup:"
+    echo ""
+    echo "1. Set up session environment:"
+    echo ""
+    echo "   mkdir -p ~/.config/plasma-workspace/env"
+    echo "   cp /usr/local/share/magic-keyboard/fcitx5-env.sh \\"
+    echo "      ~/.config/plasma-workspace/env/"
+    echo "   chmod +x ~/.config/plasma-workspace/env/fcitx5-env.sh"
+    echo ""
+    echo "2. Enable the UI service:"
+    echo ""
+    echo "   mkdir -p ~/.config/systemd/user"
+    echo "   cp /usr/local/share/magic-keyboard/magickeyboard-ui.service \\"
+    echo "      ~/.config/systemd/user/"
+    echo "   systemctl --user daemon-reload"
+    echo "   systemctl --user enable magickeyboard-ui"
+    echo ""
+    echo "3. Set up Flatpak apps (Firefox, etc.):"
+    echo ""
+    echo "   flatpak override --user --env=GTK_IM_MODULE=fcitx"
+    echo "   flatpak override --user --env=QT_IM_MODULE=fcitx"
+    echo "   flatpak override --user --env=XMODIFIERS=@im=fcitx"
+    echo ""
+    echo "4. Add 'Magic Keyboard' in:"
+    echo "   System Settings → Input Method → Add"
+    echo ""
+    echo "5. Log out and log back in (or reboot)"
+    echo ""
+    echo "For detailed instructions, see:"
+    echo "   /usr/local/share/doc/magic-keyboard/post-install.txt"
+    echo ""
+    echo "To verify installation health:"
+    echo "   magic-keyboard-verify"
+    echo ""
+}
+
+post_upgrade() {
+    echo ""
+    echo "Magic Keyboard upgraded to $pkgver"
+    echo ""
+    echo "Run 'magic-keyboard-verify' to confirm installation health."
+    echo ""
+    echo "If you encounter issues, restart the UI service:"
+    echo "   systemctl --user restart magickeyboard-ui"
+    echo ""
+}
+
+post_remove() {
+    echo ""
+    echo "Magic Keyboard removed."
+    echo ""
+    echo "You may also want to clean up user files:"
+    echo "   rm -f ~/.config/systemd/user/magickeyboard-ui.service"
+    echo "   rm -f ~/.config/autostart/magickeyboard-ui.desktop"
+    echo "   rm -rf ~/.config/magic-keyboard/"
+    echo "   systemctl --user daemon-reload"
+    echo ""
 }

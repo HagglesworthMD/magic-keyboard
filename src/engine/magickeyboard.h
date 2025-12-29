@@ -9,11 +9,21 @@
 #include <fcitx/instance.h>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace magickeyboard {
+
+// Focus & Visibility Control State Machine (Agent #2)
+// Prevents flicker via debounced show/hide transitions
+enum class VisibilityState {
+  Hidden,      // Keyboard not visible
+  PendingShow, // FocusIn received, waiting debounce before showing
+  Visible,     // Keyboard visible and active
+  PendingHide  // FocusOut received, waiting debounce before hiding
+};
 
 class MagicKeyboardEngine : public fcitx::InputMethodEngineV2 {
 public:
@@ -32,19 +42,29 @@ public:
              fcitx::InputContextEvent &) override;
 
 private:
+  // === Focus & Visibility Control (Agent #2) ===
   void handleFocusIn(fcitx::InputContext *ic);
   void handleFocusOut(fcitx::InputContext *ic);
   int shouldShowKeyboard(fcitx::InputContext *ic, std::string &reason);
 
-  void showKeyboard();
-  void hideKeyboard();
+  // Debounced state machine methods
+  void scheduleDebounce(VisibilityState target, int delayMs);
+  void cancelDebounce();
+  void executeTransition(VisibilityState target);
+  void executeShow();
+  void executeHide();
+
   void sendToUI(const std::string &msg);
   void handleKeyPress(const std::string &key);
-  void processLine(const std::string &line);
+  void processLine(const std::string &line, int clientFd);
   void startSocketServer();
   void stopSocketServer();
   void launchUI();
   void ensureUIRunning();
+
+  // === Clipboard & Shortcut Agent (Agent #7) ===
+  void handleShortcutAction(const std::string &action);
+  bool isTerminal(const std::string &program);
 
   // Watchdog to ensure keyboard hides if focus tracking fails
   void startWatchdog();
@@ -65,13 +85,28 @@ private:
   // Timer for watchdog
   std::unique_ptr<fcitx::EventSource> watchdogTimer_;
 
+  // === Focus & Visibility State Machine (Agent #2) ===
+  // Debounce configuration (milliseconds) - tuned for responsiveness vs flicker
+  static constexpr int DEBOUNCE_SHOW_MS = 50; // Wait before showing (fast)
+  static constexpr int DEBOUNCE_HIDE_MS =
+      100; // Wait before hiding (prevents flicker)
+  static constexpr int WATCHDOG_MS = 500; // Safety check interval
+
+  VisibilityState visibilityState_ = VisibilityState::Hidden;
+  fcitx::InputContext *pendingIC_ =
+      nullptr; // IC that triggered pending transition
+  std::unique_ptr<fcitx::EventSource> debounceTimer_;
+
   // Socket event sources
   std::unique_ptr<fcitx::EventSource> serverEvent_;
-  std::unique_ptr<fcitx::EventSource> clientEvent_;
+  struct Client {
+    std::unique_ptr<fcitx::EventSource> event;
+    std::string buffer;
+    std::string role;
+  };
+  std::unordered_map<int, std::unique_ptr<Client>> clients_;
 
   int serverFd_ = -1;
-  int clientFd_ = -1;
-  std::string readBuffer_;
 
   pid_t uiPid_ = 0;
   bool uiSpawnPending_ = false;
@@ -79,7 +114,50 @@ private:
   // Pointer valid only during callback context
   fcitx::InputContext *currentIC_ = nullptr;
 
-  bool keyboardVisible_ = false;
+  // v0.2.2 Geometry model
+  struct Point {
+    double x, y;
+  };
+  struct Rect {
+    double x, y, w, h;
+    bool contains(const Point &p) const {
+      return p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h;
+    }
+  };
+  struct Key {
+    std::string id;
+    Rect r;
+    Point center;
+  };
+  std::vector<Key> keys_;
+
+  // v0.2.3 Dictionary engine
+  struct DictWord {
+    std::string word;
+    uint32_t freq;
+    char first, last;
+    int len;
+  };
+  struct Candidate {
+    std::string word;
+    double score;
+  };
+  std::vector<DictWord> dictionary_;
+  std::vector<int> buckets_[26][26];
+
+  std::vector<Candidate> currentCandidates_;
+  bool candidateMode_ = false;
+  std::chrono::steady_clock::time_point lastToggleTime_;
+
+  void loadLayout(const std::string &layoutName);
+  void loadDictionary();
+  std::vector<std::string> mapPathToSequence(const std::vector<Point> &path);
+  std::vector<int> getShortlist(const std::string &keys);
+  std::vector<Candidate> generateCandidates(const std::string &keys,
+                                            size_t pointsCount);
+
+  int levenshtein(const std::string &s1, const std::string &s2, int limit);
+  double scoreCandidate(const std::string &keys, const DictWord &dw);
 };
 
 class MagicKeyboardFactory : public fcitx::AddonFactory {

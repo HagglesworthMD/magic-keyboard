@@ -30,7 +30,24 @@ target_link_libraries(magickeyboard-ui
         magickeyboard-ipc
 )
 
+# magickeyboardctl
+add_executable(magickeyboardctl
+    magickeyboardctl.cpp
+)
+
+target_link_libraries(magickeyboardctl
+    PRIVATE
+        magickeyboard-ipc
+)
+
 # Install
-install(TARGETS magickeyboard-ui
+install(TARGETS magickeyboard-ui magickeyboardctl
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+# Install KDE Plasma launcher
+if(MAGICKEYBOARD_INSTALL_DESKTOP)
+    install(FILES ../../packaging/plasma/magickeyboard.desktop
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
+    )
+endif()

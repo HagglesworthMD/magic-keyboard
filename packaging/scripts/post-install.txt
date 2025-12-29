@@ -1,0 +1,125 @@
+Magic Keyboard - Post-Installation Setup Guide
+==============================================
+
+Congratulations on installing Magic Keyboard! Complete these steps to
+finish the setup.
+
+1. SESSION ENVIRONMENT VARIABLES
+--------------------------------
+
+Magic Keyboard requires Fcitx5 environment variables to be set for all
+applications in your desktop session.
+
+Run these commands:
+
+    mkdir -p ~/.config/plasma-workspace/env
+    cp /usr/local/share/magic-keyboard/fcitx5-env.sh \
+       ~/.config/plasma-workspace/env/
+    chmod +x ~/.config/plasma-workspace/env/fcitx5-env.sh
+
+
+2. UI AUTO-START (choose ONE method)
+------------------------------------
+
+METHOD A: systemd user service (recommended)
+
+    mkdir -p ~/.config/systemd/user
+    cp /usr/local/share/magic-keyboard/magickeyboard-ui.service \
+       ~/.config/systemd/user/
+    systemctl --user daemon-reload
+    systemctl --user enable magickeyboard-ui
+
+METHOD B: KDE Autostart (fallback if systemd is flaky)
+
+    mkdir -p ~/.config/autostart
+    cp /usr/local/share/magic-keyboard/magickeyboard-ui.desktop \
+       ~/.config/autostart/
+
+
+3. FLATPAK APPLICATIONS
+-----------------------
+
+Flatpak apps (like Firefox from Flathub) run in a sandbox and need
+explicit environment overrides. Run:
+
+    flatpak override --user --env=GTK_IM_MODULE=fcitx
+    flatpak override --user --env=QT_IM_MODULE=fcitx
+    flatpak override --user --env=XMODIFIERS=@im=fcitx
+
+
+4. ADD TO FCITX5 INPUT METHODS
+------------------------------
+
+Open: System Settings → Input Method
+
+If Fcitx5 is not selected as your input method framework, enable it.
+
+Then click "Add" and select "Magic Keyboard" from the list.
+
+
+5. RESTART YOUR SESSION
+-----------------------
+
+Log out and log back in (or reboot) for all changes to take effect.
+
+
+6. VERIFICATION
+---------------
+
+After logging back in, run:
+
+    magic-keyboard-verify
+
+This will check that all components are correctly installed.
+
+
+TROUBLESHOOTING
+===============
+
+Keyboard doesn't appear:
+  - Check logs: journalctl --user -u fcitx5
+  - Check logs: journalctl --user -u magickeyboard-ui
+  - Verify environment: echo $QT_IM_MODULE (should be "fcitx")
+
+Works in some apps but not others:
+  - GTK apps: check GTK_IM_MODULE
+  - Qt apps: check QT_IM_MODULE
+  - Flatpak apps: check flatpak overrides
+
+After SteamOS update:
+  - Run: magic-keyboard-verify
+  - If libraries are missing, reinstall the package
+
+Manual control:
+  - Show keyboard: magickeyboardctl show
+  - Hide keyboard: magickeyboardctl hide
+  - Toggle: magickeyboardctl toggle
+
+
+UNINSTALLATION
+==============
+
+To completely remove Magic Keyboard:
+
+    # Stop services
+    systemctl --user stop magickeyboard-ui
+    systemctl --user disable magickeyboard-ui
+    
+    # Remove user files
+    rm -f ~/.config/systemd/user/magickeyboard-ui.service
+    rm -f ~/.config/autostart/magickeyboard-ui.desktop
+    rm -rf ~/.config/magic-keyboard/
+    systemctl --user daemon-reload
+    
+    # Remove system package
+    sudo pacman -R magic-keyboard
+    
+    # (Or if manually installed)
+    sudo rm -f /usr/local/lib/fcitx5/libmagickeyboard.so
+    sudo rm -f /usr/local/share/fcitx5/addon/magickeyboard.conf
+    sudo rm -rf /usr/local/share/magic-keyboard/
+    sudo rm -f /usr/local/bin/magickeyboard-ui
+    sudo rm -f /usr/local/bin/magickeyboardctl
+
+
+For more information, see: https://github.com/HagglesworthMD/magic-keyboard

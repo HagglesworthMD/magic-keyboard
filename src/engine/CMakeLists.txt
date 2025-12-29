@@ -2,6 +2,7 @@
 
 add_library(magickeyboard-engine MODULE
     magickeyboard.cpp
+    swipe_engine.cpp
 )
 
 target_link_libraries(magickeyboard-engine
@@ -40,13 +41,15 @@ install(TARGETS magickeyboard-engine
     LIBRARY DESTINATION ${FCITX5_ADDON_LIB_DIR}
 )
 
+# Install inputmethod configuration (tells fcitx5 about our IM)
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/magickeyboard.conf
-    DESTINATION ${FCITX5_ADDON_INSTALL_DIR}/inputmethod
+    DESTINATION ${FCITX5_IM_CONF_DIR}
 )
 
+# Install addon configuration (tells fcitx5 how to load our addon)
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/addon-magickeyboard.conf
-    DESTINATION ${FCITX5_ADDON_INSTALL_DIR}/addon
+    DESTINATION ${FCITX5_ADDON_CONF_DIR}
     RENAME magickeyboard.conf
 )

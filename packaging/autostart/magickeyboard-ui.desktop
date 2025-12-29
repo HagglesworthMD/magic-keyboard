@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Name=Magic Keyboard UI
+Comment=On-screen keyboard for KDE Plasma with swipe typing
+GenericName=Virtual Keyboard
+Exec=/usr/local/bin/magickeyboard-ui
+Icon=input-keyboard
+Categories=Utility;Accessibility;
+
+# Autostart configuration
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-phase=2
+X-KDE-autostart-after=panel
+
+# Start only in Desktop Mode (not Game Mode)
+OnlyShowIn=KDE;
+
+# Don't show in application launchers (it's a background service)
+NoDisplay=true
+
+# Restart on crash (KDE-specific, may not work everywhere)
+X-KDE-autostart-condition=true

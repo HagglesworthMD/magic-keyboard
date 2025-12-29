@@ -32,17 +32,50 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # Installation directories
 include(GNUInstallDirs)
 
-# Fcitx5 addon install path
-pkg_get_variable(FCITX5_ADDON_INSTALL_DIR Fcitx5Utils pkgdatadir)
+# Fcitx5 addon install paths
+# Try pkg-config first; fallback to GNUInstallDirs-based paths
+# CRITICAL: Never allow empty paths that resolve to root filesystem
+pkg_get_variable(_FCITX5_PKGDATADIR Fcitx5Utils pkgdatadir)
+
+if(_FCITX5_PKGDATADIR AND NOT _FCITX5_PKGDATADIR STREQUAL "")
+    # pkg-config gave us a valid path
+    set(FCITX5_ADDON_CONF_DIR "${_FCITX5_PKGDATADIR}/addon")
+    set(FCITX5_IM_CONF_DIR "${_FCITX5_PKGDATADIR}/inputmethod")
+else()
+    # Fallback: use standard GNUInstallDirs paths
+    # CMAKE_INSTALL_DATAROOTDIR is typically "share"
+    set(FCITX5_ADDON_CONF_DIR "${CMAKE_INSTALL_DATAROOTDIR}/fcitx5/addon")
+    set(FCITX5_IM_CONF_DIR "${CMAKE_INSTALL_DATAROOTDIR}/fcitx5/inputmethod")
+endif()
+
 set(FCITX5_ADDON_LIB_DIR "${CMAKE_INSTALL_LIBDIR}/fcitx5")
-message(STATUS "Fcitx5 addon data dir: ${FCITX5_ADDON_INSTALL_DIR}")
+
+# GUARD: Fail at configure time if paths would install to root
+# This catches the bug where pkg-config returns empty and fallback is broken
+if(FCITX5_ADDON_CONF_DIR MATCHES "^/addon$" OR FCITX5_ADDON_CONF_DIR MATCHES "^addon$")
+    message(FATAL_ERROR
+        "FCITX5_ADDON_CONF_DIR resolved to '${FCITX5_ADDON_CONF_DIR}' which would install to root. "
+        "Check pkg-config Fcitx5Utils and CMAKE_INSTALL_DATAROOTDIR.")
+endif()
+if(FCITX5_IM_CONF_DIR MATCHES "^/inputmethod$" OR FCITX5_IM_CONF_DIR MATCHES "^inputmethod$")
+    message(FATAL_ERROR
+        "FCITX5_IM_CONF_DIR resolved to '${FCITX5_IM_CONF_DIR}' which would install to root. "
+        "Check pkg-config Fcitx5Utils and CMAKE_INSTALL_DATAROOTDIR.")
+endif()
+
+message(STATUS "Fcitx5 addon conf dir: ${FCITX5_ADDON_CONF_DIR}")
+message(STATUS "Fcitx5 inputmethod dir: ${FCITX5_IM_CONF_DIR}")
 message(STATUS "Fcitx5 addon lib dir: ${FCITX5_ADDON_LIB_DIR}")
 
 # Data directory
-set(MAGIC_KEYBOARD_DATA_DIR "${CMAKE_INSTALL_DATADIR}/magic-keyboard")
+set(MAGIC_KEYBOARD_DATA_DIR "${CMAKE_INSTALL_DATAROOTDIR}/magic-keyboard")
+
+# Deployment Options
+option(MAGICKEYBOARD_INSTALL_DESKTOP "Install system-wide desktop launcher" OFF)
 
 # Subdirectories
 add_subdirectory(src/ipc)
+add_subdirectory(src/gesture)
 add_subdirectory(src/engine)
 add_subdirectory(src/ui)
 

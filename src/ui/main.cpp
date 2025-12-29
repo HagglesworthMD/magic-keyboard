@@ -13,6 +13,7 @@
 #include <QTimer>
 
 #include "protocol.h"
+#include <QElapsedTimer>
 
 class KeyboardBridge : public QObject {
   Q_OBJECT
@@ -23,11 +24,17 @@ public:
     socket_ = new QLocalSocket(this);
     reconnectTimer_ = new QTimer(this);
     reconnectTimer_->setSingleShot(true);
-    reconnectTimer_->setInterval(1000);
+    lastToggleTimer_.start();
 
     connect(socket_, &QLocalSocket::connected, this, [this]() {
       qDebug() << "Connected to engine";
       reconnecting_ = false;
+      // Reset backoff on successful connection
+      reconnectDelayMs_ = kInitialReconnectDelayMs;
+
+      // Identify as UI
+      socket_->write("{\"type\":\"hello\",\"role\":\"ui\"}\n");
+      socket_->flush();
     });
 
     connect(socket_, &QLocalSocket::disconnected, this, [this]() {
@@ -41,7 +48,10 @@ public:
     connect(socket_, &QLocalSocket::errorOccurred, this,
             [this](QLocalSocket::LocalSocketError err) {
               Q_UNUSED(err);
-              qDebug() << "Socket error:" << socket_->errorString();
+              // Only log on first attempt to avoid spam
+              if (reconnectDelayMs_ == kInitialReconnectDelayMs) {
+                qDebug() << "Socket error:" << socket_->errorString();
+              }
               scheduleReconnect();
             });
 
@@ -68,16 +78,43 @@ public slots:
     socket_->flush();
   }
 
-signals:
-  void visibleChanged();
-  void showKeyboard();
-  void hideKeyboard();
+  void sendAction(const QString &action) {
+    if (socket_->state() != QLocalSocket::ConnectedState)
+      return;
+    QString msg =
+        QString("{\"type\":\"action\",\"action\":\"%1\"}\n").arg(action);
+    socket_->write(msg.toUtf8());
+    socket_->flush();
+  }
+
+  void sendSwipePath(const QVariantList &path) {
+    if (socket_->state() != QLocalSocket::ConnectedState)
+      return;
+
+    // Path is list of {x, y} already in layout space
+    QString pointsJson = "[";
+    for (int i = 0; i < path.size(); ++i) {
+      QVariantMap pt = path[i].toMap();
+      pointsJson += QString("{\"x\":%1,\"y\":%2}")
+                        .arg(pt["x"].toReal())
+                        .arg(pt["y"].toReal());
+      if (i < path.size() - 1)
+        pointsJson += ",";
+    }
+    pointsJson += "]";
+
+    QString msg = QString("{\"type\":\"swipe_path\",\"layout\":\"qwerty\","
+                          "\"space\":\"layout\",\"points\":%1}\n")
+                      .arg(pointsJson);
+    socket_->write(msg.toUtf8());
+    socket_->flush();
+    qDebug() << "Sent swipe_path layout=qwerty points=" << path.size();
+  }
 
 private slots:
   void tryConnect() {
     // Only connect if in unconnected state
     if (socket_->state() != QLocalSocket::UnconnectedState) {
-      qDebug() << "Socket not unconnected, aborting first";
       socket_->abort();
       // Wait for state to settle
       QTimer::singleShot(100, this, &KeyboardBridge::tryConnect);
@@ -86,7 +123,6 @@ private slots:
 
     reconnecting_ = false;
     QString path = QString::fromStdString(magickeyboard::ipc::getSocketPath());
-    qDebug() << "Connecting to:" << path;
     socket_->connectToServer(path);
   }
 
@@ -94,7 +130,13 @@ private slots:
     if (reconnecting_)
       return;
     reconnecting_ = true;
+
+    // Exponential backoff with cap
+    reconnectTimer_->setInterval(reconnectDelayMs_);
     reconnectTimer_->start();
+
+    // Increase delay for next attempt (exponential backoff)
+    reconnectDelayMs_ = qMin(reconnectDelayMs_ * 2, kMaxReconnectDelayMs);
   }
 
   void onReadyRead() {
@@ -105,26 +147,104 @@ private slots:
       QByteArray line = buffer_.left(idx);
       buffer_.remove(0, idx + 1);
 
-      QString msg = QString::fromUtf8(line);
+      QString msg = QString::fromUtf8(line).trimmed();
 
-      if (msg.contains("\"type\":\"show\"")) {
+      if (msg.contains("\"type\":\"show\"") ||
+          msg.contains("\"type\":\"ui_show\"")) {
         qDebug() << "Received: show";
         setVisible(true);
         emit showKeyboard();
-      } else if (msg.contains("\"type\":\"hide\"")) {
+      } else if (msg.contains("\"type\":\"hide\"") ||
+                 msg.contains("\"type\":\"ui_hide\"")) {
         qDebug() << "Received: hide";
         setVisible(false);
         emit hideKeyboard();
+      } else if (msg.contains("\"type\":\"ui_toggle\"")) {
+        // Debounce toggles (100ms)
+        if (lastToggleTimer_.elapsed() < 100) {
+          qDebug() << "Ignoring rapid toggle (<100ms)";
+        } else {
+          lastToggleTimer_.restart();
+          qDebug() << "Accepted toggle (fd" << socket_->socketDescriptor()
+                   << ")";
+          bool next = !isVisible();
+          setVisible(next);
+          if (next)
+            emit showKeyboard();
+          else
+            emit hideKeyboard();
+        }
+      } else if (msg.contains("\"type\":\"swipe_keys\"")) {
+        QStringList keys;
+        int arrKeyPos = msg.indexOf("\"keys\":[");
+        if (arrKeyPos >= 0) {
+          int arrStart = arrKeyPos + 8;
+          int arrEnd = msg.indexOf("]", arrStart);
+          if (arrEnd > arrStart) {
+            QString content = msg.mid(arrStart, arrEnd - arrStart);
+            QStringList items = content.split(",", Qt::SkipEmptyParts);
+            for (auto &item : items) {
+              keys << item.trimmed().remove("\"");
+            }
+          }
+        }
+        qDebug() << "Received swipe_keys count=" << keys.size();
+        emit swipeKeysReceived(keys);
+      } else if (msg.contains("\"type\":\"swipe_candidates\"")) {
+        QStringList words;
+        int arrStart = msg.indexOf("\"candidates\":[");
+        if (arrStart >= 0) {
+          arrStart += 14;
+          int arrEnd = msg.indexOf("]", arrStart);
+          if (arrEnd > arrStart) {
+            QString content = msg.mid(arrStart, arrEnd - arrStart);
+            // Content is list of {"w":"..."}
+            int wPos = 0;
+            while ((wPos = content.indexOf("\"w\":\"", wPos)) >= 0) {
+              int wStart = wPos + 5;
+              int wEnd = content.indexOf("\"", wStart);
+              if (wEnd > wStart) {
+                words << content.mid(wStart, wEnd - wStart);
+              }
+              wPos = wEnd;
+            }
+          }
+        }
+        qDebug() << "Received swipe_candidates count=" << words.size();
+        emit swipeCandidatesReceived(words);
       }
     }
   }
 
+public slots:
+  void commitCandidate(const QString &word) {
+    if (socket_->state() != QLocalSocket::ConnectedState)
+      return;
+    QString msg =
+        QString("{\"type\":\"commit_candidate\",\"text\":\"%1\"}\n").arg(word);
+    socket_->write(msg.toUtf8());
+    socket_->flush();
+  }
+
 private:
+  // Exponential backoff constants for reconnection
+  static constexpr int kInitialReconnectDelayMs = 100;
+  static constexpr int kMaxReconnectDelayMs = 5000;
+
   QLocalSocket *socket_;
   QTimer *reconnectTimer_;
   QByteArray buffer_;
   bool visible_ = false;
   bool reconnecting_ = false;
+  int reconnectDelayMs_ = kInitialReconnectDelayMs;
+  QElapsedTimer lastToggleTimer_;
+
+signals:
+  void visibleChanged();
+  void showKeyboard();
+  void hideKeyboard();
+  void swipeKeysReceived(const QStringList &keys);
+  void swipeCandidatesReceived(const QStringList &candidates);
 };
 
 int main(int argc, char *argv[]) {
@@ -173,13 +293,13 @@ int main(int argc, char *argv[]) {
           QObject::connect(&bridge, &KeyboardBridge::hideKeyboard, window,
                            [window]() { window->hide(); });
 
-          // Start hidden
-          window->hide();
+          // Show on start (manual launch)
+          window->show();
 
           // Connect to engine
           bridge.connectToEngine();
 
-          qDebug() << "Window ready, hidden until focus";
+          qDebug() << "Window ready and visible";
         }
       },
       Qt::QueuedConnection);

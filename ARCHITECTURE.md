@@ -154,29 +154,41 @@ window->setFlags(
 
 Future: migrate to protobuf or capnproto if perf matters.
 
-### 4. Swipe Library: `libmagicswipe`
+### 4. Swipe Typing Engine
 
-**Location:** `src/swipe/` (v0.2)
+**Location:** `src/engine/swipe_engine.h`, `src/engine/swipe_engine.cpp`
 
-**Algorithm:**
-1. **Deadzone:** Ignore movement < 6-10px from touch start
-2. **Sampling:** 120Hz or every 4px moved, whichever later
-3. **Smoothing:** Exponential low-pass (α ≈ 0.35)
-4. **Resample:** Uniform 3px spacing along path
-5. **Key mapping:** Nearest-key hit test, collapse consecutive duplicates
-6. **Termination:** Button up OR 250ms stationary pause
+**Full Specification:** [`docs/SWIPE_ENGINE_SPEC.md`](docs/SWIPE_ENGINE_SPEC.md)
 
-### 5. Candidate Library: `libmagiccand`
+This is the core language-agnostic swipe typing algorithm, designed to be:
+- **Deterministic:** Same path → same candidates (unit-testable)
+- **On-device:** No neural networks, no cloud calls
+- **Geometry-first:** Spatial proximity drives key detection
 
-**Location:** `src/candidate/` (v0.2)
+**Key Components:**
 
-**MVP Algorithm:**
-- Dictionary as trie with word frequencies
-- Key sequence from swipe → generate candidates by:
-  - Allowing neighbor-key substitutions (bounded beam search)
-  - Restricting to dictionary prefixes
-- Score: spatial error + edit distance + frequency
-- Return top 5 candidates
+1. **Path → Key Sequence:** Hysteresis-filtered mapping with bounce removal
+2. **Shortlist Generation:** First/last char bucket index, length tolerance ±3
+3. **Candidate Scoring:** Weighted combination of:
+   - Edit distance (Levenshtein with early exit)
+   - Bigram overlap
+   - Word frequency (log-scaled)
+   - Spatial distance from expected path
+4. **Thresholds:** Minimum score filtering, max 8 candidates
+
+**Usage from Engine:**
+
+```cpp
+#include "swipe_engine.h"
+
+swipe::SwipeEngine engine;
+engine.loadLayout("data/layouts/qwerty.json");
+engine.loadDictionary("data/dict/words.txt", "data/dict/freq.tsv");
+
+std::vector<swipe::Point> path = { /* from UI */ };
+auto keySeq = engine.mapPathToSequence(path);
+auto candidates = engine.generateCandidates(joinKeys(keySeq));
+```
 
 ---
 
@@ -209,18 +221,32 @@ Future: migrate to protobuf or capnproto if perf matters.
 
 ## Copy/Paste Implementation
 
-### v0.1: Shortcut Forwarding via IM
+> **Detailed Design:** See `.agent/CLIPBOARD_SHORTCUT_AGENT.md` for complete specification.
+
+### Strategy: Shortcut Forwarding via IM
+
+All clipboard operations use `InputContext::forwardKey()` to send the appropriate
+keystroke through the sanctioned IM protocol. This is Wayland-safe and does not
+require compositor privileges.
 
 ```cpp
-void MagicKeyboardEngine::handleAction(const std::string& action, InputContext* ic) {
-    fcitx::KeySym sym;
-    fcitx::KeyStates states = fcitx::KeyState::Ctrl;
+void MagicKeyboardEngine::handleShortcutAction(const std::string& action) {
+    auto* ic = currentIC_;
+    if (!ic) return;
     
+    // Auto-detect terminals (Konsole, Alacritty, etc.)
+    bool useShift = isTerminal(ic->program()) && 
+                    (action == "copy" || action == "paste");
+    
+    fcitx::KeySym sym;
     if (action == "copy") sym = FcitxKey_c;
     else if (action == "paste") sym = FcitxKey_v;
     else if (action == "cut") sym = FcitxKey_x;
     else if (action == "selectall") sym = FcitxKey_a;
     else return;
+    
+    fcitx::KeyStates states = fcitx::KeyState::Ctrl;
+    if (useShift) states |= fcitx::KeyState::Shift;
     
     fcitx::Key key(sym, states);
     ic->forwardKey(key, /* isRelease */ false);
@@ -228,15 +254,21 @@ void MagicKeyboardEngine::handleAction(const std::string& action, InputContext* 
 }
 ```
 
-**Note:** Exact API will be verified during implementation. This is the conceptual approach.
+### Terminal Auto-Detection
 
-### v0.3: Terminal Mode Toggle
+Terminals use Ctrl+Shift+C/V (because Ctrl+C sends SIGINT). The engine
+automatically detects terminals by checking `ic->program()` against a known list:
 
-Terminals use Ctrl+Shift+C/V. We add a user-togglable "Terminal Mode" setting:
-- OFF (default): Ctrl+C/V
-- ON: Ctrl+Shift+C/V
+- konsole, yakuake, gnome-terminal, alacritty, kitty, foot, wezterm, xterm, etc.
 
-No auto-detection by process name in v0.1-v0.2.
+### Edge Cases
+
+| Context | Copy/Paste | Notes |
+|---------|------------|-------|
+| Normal apps | Ctrl+C/V | Standard shortcuts |
+| Terminals | Ctrl+Shift+C/V | Auto-detected |
+| Password fields | Block copy/cut | Security; paste allowed |
+| Read-only fields | Block paste/cut | Allow copy/selectall |
 
 ---
 

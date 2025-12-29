@@ -1,0 +1,169 @@
+#!/bin/bash
+# Magic Keyboard Installation Verification Script
+# Run this to confirm Magic Keyboard is correctly installed and functional.
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+pass() { echo -e "${GREEN}✓${NC} $1"; }
+fail() { echo -e "${RED}✗${NC} $1"; }
+warn() { echo -e "${YELLOW}⚠${NC} $1"; }
+
+echo ""
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║           Magic Keyboard Installation Verification           ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""
+
+ERRORS=0
+
+# 1. Check addon library
+echo "=== Fcitx5 Addon ==="
+if [[ -f /usr/local/lib/fcitx5/libmagickeyboard.so ]]; then
+    pass "Addon library present: /usr/local/lib/fcitx5/libmagickeyboard.so"
+else
+    fail "Addon library MISSING: /usr/local/lib/fcitx5/libmagickeyboard.so"
+    ((ERRORS++))
+fi
+
+# 2. Check addon config
+if [[ -f /usr/local/share/fcitx5/addon/magickeyboard.conf ]]; then
+    pass "Addon config present: magickeyboard.conf"
+else
+    fail "Addon config MISSING: /usr/local/share/fcitx5/addon/magickeyboard.conf"
+    ((ERRORS++))
+fi
+
+# 3. Check input method config
+if [[ -f /usr/local/share/fcitx5/inputmethod/magic-keyboard.conf ]]; then
+    pass "Input method config present: magic-keyboard.conf"
+else
+    warn "Input method config not found (may be optional)"
+fi
+
+# 4. Check UI binary
+echo ""
+echo "=== Binaries ==="
+if command -v magickeyboard-ui &>/dev/null; then
+    pass "UI binary found: $(which magickeyboard-ui)"
+else
+    fail "UI binary MISSING: magickeyboard-ui not in PATH"
+    ((ERRORS++))
+fi
+
+if command -v magickeyboardctl &>/dev/null; then
+    pass "Control tool found: $(which magickeyboardctl)"
+else
+    warn "Control tool not found: magickeyboardctl (optional)"
+fi
+
+# 5. Check environment variables
+echo ""
+echo "=== Session Environment ==="
+
+if [[ "${GTK_IM_MODULE:-}" == "fcitx" ]]; then
+    pass "GTK_IM_MODULE=fcitx"
+else
+    warn "GTK_IM_MODULE not set to 'fcitx' (current: ${GTK_IM_MODULE:-<unset>})"
+    warn "  → GTK apps may not show keyboard"
+fi
+
+if [[ "${QT_IM_MODULE:-}" == "fcitx" ]]; then
+    pass "QT_IM_MODULE=fcitx"
+else
+    warn "QT_IM_MODULE not set to 'fcitx' (current: ${QT_IM_MODULE:-<unset>})"
+    warn "  → Qt apps may not show keyboard"
+fi
+
+if [[ "${XMODIFIERS:-}" == "@im=fcitx" ]]; then
+    pass "XMODIFIERS=@im=fcitx"
+else
+    warn "XMODIFIERS not set to '@im=fcitx' (current: ${XMODIFIERS:-<unset>})"
+    warn "  → X11 apps may not show keyboard"
+fi
+
+# 6. Check session environment file
+if [[ -f ~/.config/plasma-workspace/env/fcitx5-env.sh ]] || \
+   [[ -f ~/.config/plasma-workspace/env/fcitx.sh ]]; then
+    pass "Plasma session env script exists"
+else
+    warn "No Plasma env script found"
+    warn "  → Create ~/.config/plasma-workspace/env/fcitx5-env.sh"
+fi
+
+# 7. Check Fcitx5 running
+echo ""
+echo "=== Runtime Status ==="
+if pgrep -x fcitx5 >/dev/null; then
+    pass "Fcitx5 daemon running (PID: $(pgrep -x fcitx5 | head -1))"
+else
+    warn "Fcitx5 daemon not running"
+    warn "  → It should auto-start when you focus a text field"
+fi
+
+# 8. Check UI service
+if systemctl --user is-enabled magickeyboard-ui.service &>/dev/null; then
+    pass "UI service enabled: magickeyboard-ui.service"
+    
+    if systemctl --user is-active magickeyboard-ui.service &>/dev/null; then
+        pass "UI service running"
+    else
+        warn "UI service enabled but not running"
+        warn "  → Run: systemctl --user start magickeyboard-ui"
+    fi
+else
+    # Check autostart fallback
+    if [[ -f ~/.config/autostart/magickeyboard-ui.desktop ]]; then
+        pass "UI autostart desktop file exists (alternative to systemd)"
+    else
+        warn "UI service not enabled and no autostart fallback"
+        warn "  → See post-install instructions"
+    fi
+fi
+
+# 9. Check socket
+SOCKET_PATH="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/magic-keyboard.sock"
+if [[ -S "$SOCKET_PATH" ]]; then
+    pass "IPC socket exists: $SOCKET_PATH"
+else
+    warn "IPC socket not found (engine may not be running)"
+fi
+
+# 10. Check Wayland/X11 session
+echo ""
+echo "=== Display Session ==="
+if [[ "${XDG_SESSION_TYPE:-}" == "wayland" ]]; then
+    pass "Running on Wayland (optimal)"
+elif [[ "${XDG_SESSION_TYPE:-}" == "x11" ]]; then
+    pass "Running on X11 (supported)"
+else
+    warn "Unknown session type: ${XDG_SESSION_TYPE:-<unset>}"
+fi
+
+if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+    pass "WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+fi
+
+# 11. Summary
+echo ""
+echo "════════════════════════════════════════════════════════════════"
+
+if [[ $ERRORS -eq 0 ]]; then
+    echo -e "${GREEN}Installation looks healthy!${NC}"
+    echo ""
+    echo "If the keyboard still doesn't show:"
+    echo "  1. Log out and log back in"
+    echo "  2. Check: journalctl --user -u fcitx5"
+    echo "  3. Check: journalctl --user -u magickeyboard-ui"
+else
+    echo -e "${RED}$ERRORS critical issue(s) found.${NC}"
+    echo ""
+    echo "Please resolve the issues marked with ✗ above."
+    exit 1
+fi
+
+echo ""

@@ -1,0 +1,321 @@
+{
+    "name": "QWERTY-PointerOptimized",
+    "version": "2.0",
+    "description": "Pointer-first layout for Apple Magic Trackpad on Steam Deck",
+    "geometry": {
+        "gridUnit": 64,
+        "keyHeight": 52,
+        "keyGap": 8,
+        "hitPadding": 4,
+        "rowHeight": 60,
+        "cornerRadius": 10,
+        "candidateBarHeight": 48
+    },
+    "designNotes": {
+        "minKeyVisual": "64x52 px (1u letter key)",
+        "minKeyHitZone": "72x60 px (+4px padding each side)",
+        "clickTargetRule": "Hit zone always exceeds visual bounds",
+        "hoverLatency": "< 16ms (instant)",
+        "swipeDeadzone": "12px",
+        "swipeTimeThreshold": "40ms"
+    },
+    "rows": [
+        {
+            "y": 0,
+            "comment": "Top alpha row: Q-P + Backspace (1.5u)",
+            "keys": [
+                {
+                    "label": "q",
+                    "code": "q",
+                    "x": 0,
+                    "w": 1
+                },
+                {
+                    "label": "w",
+                    "code": "w",
+                    "x": 1,
+                    "w": 1
+                },
+                {
+                    "label": "e",
+                    "code": "e",
+                    "x": 2,
+                    "w": 1
+                },
+                {
+                    "label": "r",
+                    "code": "r",
+                    "x": 3,
+                    "w": 1
+                },
+                {
+                    "label": "t",
+                    "code": "t",
+                    "x": 4,
+                    "w": 1
+                },
+                {
+                    "label": "y",
+                    "code": "y",
+                    "x": 5,
+                    "w": 1
+                },
+                {
+                    "label": "u",
+                    "code": "u",
+                    "x": 6,
+                    "w": 1
+                },
+                {
+                    "label": "i",
+                    "code": "i",
+                    "x": 7,
+                    "w": 1
+                },
+                {
+                    "label": "o",
+                    "code": "o",
+                    "x": 8,
+                    "w": 1
+                },
+                {
+                    "label": "p",
+                    "code": "p",
+                    "x": 9,
+                    "w": 1
+                },
+                {
+                    "label": "⌫",
+                    "code": "backspace",
+                    "x": 10,
+                    "w": 1.5,
+                    "type": "special"
+                }
+            ]
+        },
+        {
+            "y": 1,
+            "offset": 0.25,
+            "comment": "Home row: A-L + Enter (1.5u), 0.25u stagger",
+            "keys": [
+                {
+                    "label": "a",
+                    "code": "a",
+                    "x": 0,
+                    "w": 1
+                },
+                {
+                    "label": "s",
+                    "code": "s",
+                    "x": 1,
+                    "w": 1
+                },
+                {
+                    "label": "d",
+                    "code": "d",
+                    "x": 2,
+                    "w": 1
+                },
+                {
+                    "label": "f",
+                    "code": "f",
+                    "x": 3,
+                    "w": 1
+                },
+                {
+                    "label": "g",
+                    "code": "g",
+                    "x": 4,
+                    "w": 1
+                },
+                {
+                    "label": "h",
+                    "code": "h",
+                    "x": 5,
+                    "w": 1
+                },
+                {
+                    "label": "j",
+                    "code": "j",
+                    "x": 6,
+                    "w": 1
+                },
+                {
+                    "label": "k",
+                    "code": "k",
+                    "x": 7,
+                    "w": 1
+                },
+                {
+                    "label": "l",
+                    "code": "l",
+                    "x": 8,
+                    "w": 1
+                },
+                {
+                    "label": "↵",
+                    "code": "enter",
+                    "x": 9,
+                    "w": 1.5,
+                    "type": "special"
+                }
+            ]
+        },
+        {
+            "y": 2,
+            "comment": "Bottom alpha: Shift (1.5u) + Z-M + punctuation",
+            "keys": [
+                {
+                    "label": "⇧",
+                    "code": "shift",
+                    "x": 0,
+                    "w": 1.5,
+                    "type": "special"
+                },
+                {
+                    "label": "z",
+                    "code": "z",
+                    "x": 1.5,
+                    "w": 1
+                },
+                {
+                    "label": "x",
+                    "code": "x",
+                    "x": 2.5,
+                    "w": 1
+                },
+                {
+                    "label": "c",
+                    "code": "c",
+                    "x": 3.5,
+                    "w": 1
+                },
+                {
+                    "label": "v",
+                    "code": "v",
+                    "x": 4.5,
+                    "w": 1
+                },
+                {
+                    "label": "b",
+                    "code": "b",
+                    "x": 5.5,
+                    "w": 1
+                },
+                {
+                    "label": "n",
+                    "code": "n",
+                    "x": 6.5,
+                    "w": 1
+                },
+                {
+                    "label": "m",
+                    "code": "m",
+                    "x": 7.5,
+                    "w": 1
+                },
+                {
+                    "label": ",",
+                    "code": ",",
+                    "x": 8.5,
+                    "w": 1
+                },
+                {
+                    "label": ".",
+                    "code": ".",
+                    "x": 9.5,
+                    "w": 1
+                }
+            ]
+        },
+        {
+            "y": 3,
+            "comment": "Action row: Copy/Paste (1.25u) + Space (5u) + Cut/SelAll (1.25u)",
+            "keys": [
+                {
+                    "label": "Copy",
+                    "code": "copy",
+                    "x": 0,
+                    "w": 1.25,
+                    "type": "action"
+                },
+                {
+                    "label": "Paste",
+                    "code": "paste",
+                    "x": 1.25,
+                    "w": 1.25,
+                    "type": "action"
+                },
+                {
+                    "label": "",
+                    "code": "space",
+                    "x": 2.5,
+                    "w": 5,
+                    "type": "special"
+                },
+                {
+                    "label": "Cut",
+                    "code": "cut",
+                    "x": 7.5,
+                    "w": 1.25,
+                    "type": "action"
+                },
+                {
+                    "label": "SelAll",
+                    "code": "selectall",
+                    "x": 8.75,
+                    "w": 1.25,
+                    "type": "action"
+                }
+            ]
+        }
+    ],
+    "keySizeClasses": {
+        "1u": {
+            "width": 64,
+            "hitWidth": 72,
+            "description": "Standard letter key"
+        },
+        "1.25u": {
+            "width": 80,
+            "hitWidth": 88,
+            "description": "Tab, action keys"
+        },
+        "1.5u": {
+            "width": 96,
+            "hitWidth": 104,
+            "description": "Backspace, Enter, Shift"
+        },
+        "2u": {
+            "width": 128,
+            "hitWidth": 136,
+            "description": "Caps Lock (if present)"
+        },
+        "5u": {
+            "width": 320,
+            "hitWidth": 328,
+            "description": "Space bar"
+        }
+    },
+    "colorScheme": {
+        "background": "#1a1a2e",
+        "keyIdle": "#2a2a4a",
+        "keyHover": "#3a3a6a",
+        "keyPressed": "#5a5a9a",
+        "borderIdle": "#4a4a6a",
+        "borderHover": "#88c0d0",
+        "textPrimary": "#eceff4",
+        "textSpecial": "#88c0d0",
+        "accent": "#88c0d0",
+        "candidateBarBg": "#0f0f1a",
+        "swipeTrail": "rgba(136, 192, 208, 0.6)"
+    },
+    "swipeConfig": {
+        "deadzone": 12,
+        "timeThreshold": 40,
+        "smoothingAlpha": 0.35,
+        "resampleDistance": 8,
+        "trailWidth": 4,
+        "trailFadeDuration": 300
+    }
+}
