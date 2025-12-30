@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <set>
 #include <fcntl.h>
 #include <fstream>
 #include <signal.h>
@@ -1139,20 +1140,57 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
       MKLOG(Info) << "Swipe keys from path: " << keysString << " (from " << seq.size() << " raw keys)";
     }
 
-    if (!keysString.empty()) {
-      auto candidates = generateCandidates(keysString, path.size() > 0 ? path.size() : keysString.size());
+    // Try SHARK2 recognition first if we have path points
+    std::vector<Candidate> candidates;
+    bool usedShark2 = false;
 
-      // Auto-commit: immediately commit the top candidate with a space
-      if (!candidates.empty()) {
-        auto *ic = pickTargetInputContext();
-        if (ic) {
-          std::string word = candidates[0].word + " ";
-          ic->commitString(word);
-          MKLOG(Info) << "AutoCommit swipe word=" << candidates[0].word;
-          recordWordCommit(candidates[0].word);
-          candidateMode_ = false;
-          currentCandidates_.clear();
+    MKLOG(Info) << "SHARK2 check: useShark2=" << useShark2_
+                << " path.size=" << path.size()
+                << " templates=" << shark2Engine_.getTemplateCount();
+
+    if (useShark2_ && !path.empty() && path.size() >= 3) {
+      // Convert to SHARK2 point format
+      std::vector<shark2::Point> shark2Path;
+      shark2Path.reserve(path.size());
+      for (const auto& pt : path) {
+        shark2Path.emplace_back(pt.x, pt.y);
+      }
+
+      MKLOG(Info) << "SHARK2 input: " << shark2Path.size() << " points, first=("
+                  << shark2Path[0].x << "," << shark2Path[0].y << ") last=("
+                  << shark2Path.back().x << "," << shark2Path.back().y << ")";
+
+      auto shark2Results = shark2Engine_.recognize(shark2Path, 8);
+      MKLOG(Info) << "SHARK2 results: " << shark2Results.size() << " candidates";
+
+      if (!shark2Results.empty()) {
+        usedShark2 = true;
+        for (const auto& r : shark2Results) {
+          candidates.push_back({r.word, r.score});
         }
+        MKLOG(Info) << "SHARK2 recognized: top=" << candidates[0].word
+                    << " score=" << candidates[0].score
+                    << " candidates=" << candidates.size();
+      }
+    }
+
+    // Fall back to key-sequence based matching if SHARK2 didn't work
+    if (candidates.empty() && !keysString.empty()) {
+      candidates = generateCandidates(keysString, path.size() > 0 ? path.size() : keysString.size());
+      MKLOG(Info) << "Fallback to key-sequence matching: " << keysString;
+    }
+
+    if (!candidates.empty()) {
+      // Auto-commit: immediately commit the top candidate with a space
+      auto *ic = pickTargetInputContext();
+      if (ic) {
+        std::string word = candidates[0].word + " ";
+        ic->commitString(word);
+        MKLOG(Info) << "AutoCommit swipe word=" << candidates[0].word
+                    << " (shark2=" << usedShark2 << ")";
+        recordWordCommit(candidates[0].word);
+        candidateMode_ = false;
+        currentCandidates_.clear();
       }
 
       // Send keys for debug highlight with sequence echo
@@ -1476,24 +1514,114 @@ void MagicKeyboardEngine::loadDictionary() {
     }
   }
   MKLOG(Info) << "Loaded " << dictionary_.size() << " words";
+
+  // Initialize SHARK2 engine with the same dictionary
+  if (useShark2_) {
+    std::vector<std::pair<std::string, uint32_t>> shark2Words;
+    shark2Words.reserve(dictionary_.size());
+    for (const auto& dw : dictionary_) {
+      // SHARK2 expects frequency rank (lower = better), not raw frequency
+      // Convert: higher raw freq -> lower rank
+      uint32_t rank = dw.freq > 0 ? (100000 / (dw.freq + 1)) : 50000;
+      shark2Words.emplace_back(dw.word, rank);
+    }
+    shark2Engine_.setKeyboardSize(580, 200);  // Match compact UI
+    shark2Engine_.loadDictionaryWithFrequency(shark2Words);
+    MKLOG(Info) << "SHARK2 engine loaded " << shark2Engine_.getTemplateCount() << " templates";
+  }
 }
+
+// Keyboard adjacency map for QWERTY layout
+static const std::vector<std::vector<char>> adjacentKeys = {
+    {'q', 's', 'z', 'w'},                   // a
+    {'v', 'g', 'h', 'n'},                   // b
+    {'x', 'd', 'f', 'v'},                   // c
+    {'s', 'e', 'r', 'f', 'c', 'x'},         // d
+    {'w', 's', 'd', 'r'},                   // e
+    {'d', 'r', 't', 'g', 'v', 'c'},         // f
+    {'f', 't', 'y', 'h', 'b', 'v'},         // g
+    {'g', 'y', 'u', 'j', 'n', 'b'},         // h
+    {'u', 'j', 'k', 'o'},                   // i
+    {'h', 'u', 'i', 'k', 'm', 'n'},         // j
+    {'j', 'i', 'o', 'l', 'm'},              // k
+    {'k', 'o', 'p'},                        // l
+    {'n', 'j', 'k'},                        // m
+    {'b', 'h', 'j', 'm'},                   // n
+    {'i', 'k', 'l', 'p'},                   // o
+    {'o', 'l'},                             // p
+    {'w', 'a', 's'},                        // q
+    {'e', 'd', 'f', 't'},                   // r
+    {'a', 'w', 'e', 'd', 'x', 'z'},         // s
+    {'r', 'f', 'g', 'y'},                   // t
+    {'y', 'h', 'j', 'i'},                   // u
+    {'c', 'f', 'g', 'b'},                   // v
+    {'q', 'a', 's', 'e'},                   // w
+    {'z', 's', 'd', 'c'},                   // x
+    {'t', 'g', 'h', 'u'},                   // y
+    {'a', 's', 'x'},                        // z
+};
 
 std::vector<int> MagicKeyboardEngine::getShortlist(const std::string &keys) {
   if (keys.empty())
     return {};
-  int fidx = std::tolower(keys[0]) - 'a';
-  int lidx = std::tolower(keys.back()) - 'a';
+
+  char firstChar = std::tolower(keys[0]);
+  char lastChar = std::tolower(keys.back());
+  int fidx = firstChar - 'a';
+  int lidx = lastChar - 'a';
   if (fidx < 0 || fidx >= 26 || lidx < 0 || lidx >= 26)
     return {};
 
   std::vector<int> result;
   int targetLen = (int)keys.length();
-  for (int idx : buckets_[fidx][lidx]) {
-    const auto &dw = dictionary_[idx];
-    if (std::abs(dw.len - targetLen) <= 3) {
-      result.push_back(idx);
+
+  // Collect first/last letter candidates including adjacent keys
+  std::vector<int> firstCandidates = {fidx};
+  std::vector<int> lastCandidates = {lidx};
+
+  // Add adjacent keys for first letter
+  for (char adj : adjacentKeys[fidx]) {
+    int adjIdx = adj - 'a';
+    if (adjIdx >= 0 && adjIdx < 26)
+      firstCandidates.push_back(adjIdx);
+  }
+
+  // Add adjacent keys for last letter
+  for (char adj : adjacentKeys[lidx]) {
+    int adjIdx = adj - 'a';
+    if (adjIdx >= 0 && adjIdx < 26)
+      lastCandidates.push_back(adjIdx);
+  }
+
+  // Search all combinations of first/last candidates
+  std::set<int> seen;
+  for (int fi : firstCandidates) {
+    for (int li : lastCandidates) {
+      for (int idx : buckets_[fi][li]) {
+        if (seen.count(idx))
+          continue;
+        const auto &dw = dictionary_[idx];
+        // Allow ±4 length difference for more flexibility
+        if (std::abs(dw.len - targetLen) <= 4) {
+          result.push_back(idx);
+          seen.insert(idx);
+        }
+      }
     }
   }
+
+  // If still no results, do a broader search with just length filtering
+  if (result.empty() && keys.length() >= 3) {
+    for (size_t i = 0; i < dictionary_.size(); ++i) {
+      const auto &dw = dictionary_[i];
+      if (std::abs(dw.len - targetLen) <= 2) {
+        result.push_back(i);
+        if (result.size() > 500)
+          break; // Cap for performance
+      }
+    }
+  }
+
   return result;
 }
 

@@ -371,8 +371,17 @@ public slots:
     }
     keysJson += "]";
 
-    // Build points JSON (minimal, since we have keys)
-    QString pointsJson = "[]";
+    // Build points JSON for SHARK2 recognition
+    QString pointsJson = "[";
+    for (int i = 0; i < path.size(); ++i) {
+      QVariantMap pt = path[i].toMap();
+      double x = pt["x"].toDouble();
+      double y = pt["y"].toDouble();
+      pointsJson += QString("{\"x\":%1,\"y\":%2}").arg(x).arg(y);
+      if (i < path.size() - 1)
+        pointsJson += ",";
+    }
+    pointsJson += "]";
 
     lastSwipeSeqSent_ = swipeSeq_++;
     QString msg = QString("{\"type\":\"swipe_path\",\"seq\":%1,\"layout\":\""
@@ -384,7 +393,7 @@ public slots:
     socket_->flush();
     lastSwipeSentTimer_.restart();
     qDebug() << "Sent swipe_path seq=" << lastSwipeSeqSent_
-             << "ui_keys=" << keys.size();
+             << "ui_keys=" << keys.size() << "points=" << path.size();
   }
 
 private slots:

@@ -10,6 +10,7 @@
 
 #include "settings.h"
 #include "user_data.h"
+#include "shark2.h"
 
 #include <atomic>
 #include <chrono>
@@ -168,6 +169,10 @@ private:
   std::vector<Candidate> currentCandidates_;
   bool candidateMode_ = false;
   std::chrono::steady_clock::time_point lastToggleTime_;
+
+  // SHARK2 engine for gesture recognition
+  shark2::Shark2Engine shark2Engine_;
+  bool useShark2_ = true;  // Enable SHARK2 algorithm
 
   // Learning context
   std::string lastCommittedWord_;
