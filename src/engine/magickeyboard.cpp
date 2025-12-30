@@ -230,6 +230,15 @@ void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
     return;
   }
 
+  // CRITICAL FIX: When UI is visible, ignore focus changes to preserve typing target
+  // The UI window might trigger FocusIn events even with WindowDoesNotAcceptFocus
+  if (visibilityState_ == VisibilityState::Visible) {
+    MKLOG(Info) << "FocusIn while UI visible - ignoring to preserve typing IC "
+                << (void *)preservedIC_;
+    // Do NOT update currentIC_ or lastFocusedIc_ - keep using preservedIC_
+    return;
+  }
+
   switch (visibilityState_) {
   case VisibilityState::Hidden:
     currentIC_ = ic;
@@ -258,9 +267,7 @@ void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
     break;
 
   case VisibilityState::Visible:
-    // Already visible, just update IC
-    currentIC_ = ic;
-    lastFocusedIc_ = ic;
+    // This case is now handled above with early return
     break;
   }
 }
@@ -272,6 +279,14 @@ void MagicKeyboardEngine::handleFocusOut(fcitx::InputContext *ic) {
   std::string program = ic ? ic->program() : "?";
   MKLOG(Info) << "FocusOut: " << program
               << " state=" << static_cast<int>(visibilityState_);
+
+  // CRITICAL FIX: When UI is visible, ignore focus changes to preserve typing target
+  if (visibilityState_ == VisibilityState::Visible) {
+    MKLOG(Info) << "FocusOut while UI visible - ignoring to preserve typing IC "
+                << (void *)preservedIC_;
+    // Do NOT clear currentIC_ or trigger hide - keep keyboard visible with preserved IC
+    return;
+  }
 
   switch (visibilityState_) {
   case VisibilityState::Hidden:
@@ -289,8 +304,7 @@ void MagicKeyboardEngine::handleFocusOut(fcitx::InputContext *ic) {
     break;
 
   case VisibilityState::Visible:
-    visibilityState_ = VisibilityState::PendingHide;
-    scheduleDebounce(VisibilityState::Hidden, DEBOUNCE_HIDE_MS);
+    // This case is now handled above with early return
     break;
 
   case VisibilityState::PendingHide:
@@ -337,6 +351,20 @@ void MagicKeyboardEngine::executeTransition(VisibilityState target) {
 }
 
 void MagicKeyboardEngine::executeShow() {
+  // CRITICAL: Preserve IC BEFORE UI appears to survive focus theft
+  if (currentIC_ != nullptr) {
+    preservedIC_ = currentIC_;
+    MKLOG(Info) << "Preserved IC for typing: " << (void *)preservedIC_
+                << " program=" << (preservedIC_ ? preservedIC_->program() : "?");
+  } else if (lastFocusedIc_ != nullptr) {
+    preservedIC_ = lastFocusedIc_;
+    MKLOG(Info) << "Preserved lastFocusedIc for typing: " << (void *)preservedIC_
+                << " program="
+                << (preservedIC_ ? preservedIC_->program() : "?");
+  } else {
+    MKLOG(Warn) << "executeShow: no IC to preserve (typing will fail!)";
+  }
+
   visibilityState_ = VisibilityState::Visible;
   pendingIC_ = nullptr;
   ensureUIRunning();
@@ -345,6 +373,12 @@ void MagicKeyboardEngine::executeShow() {
 }
 
 void MagicKeyboardEngine::executeHide() {
+  // Release preserved IC when UI is hidden
+  if (preservedIC_ != nullptr) {
+    MKLOG(Info) << "Released preserved IC: " << (void *)preservedIC_;
+    preservedIC_ = nullptr;
+  }
+
   visibilityState_ = VisibilityState::Hidden;
   pendingIC_ = nullptr;
   sendToUI("{\"type\":\"hide\"}\n");
@@ -422,6 +456,15 @@ bool MagicKeyboardEngine::isTerminal(const std::string &program) {
 }
 
 fcitx::InputContext *MagicKeyboardEngine::pickTargetInputContext() {
+  // CRITICAL FIX: When UI is visible, use preserved IC for all typing
+  // This IC was captured before the UI appeared and survives focus theft
+  if (visibilityState_ == VisibilityState::Visible && preservedIC_ != nullptr) {
+    MKLOG(Debug) << "Using preserved IC for typing: " << (void *)preservedIC_
+                 << " program=" << preservedIC_->program();
+    return preservedIC_;
+  }
+
+  // Normal operation: use current focused IC
   if (currentIC_ && currentIC_->hasFocus()) {
     return currentIC_;
   }
@@ -843,13 +886,16 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
       auto end = line.find("\"", pos);
       if (end != std::string::npos) {
         std::string text = line.substr(pos, end - pos);
-        auto *ic = instance_->inputContextManager().lastFocusedInputContext();
-        if (ic && ic->hasFocus()) {
+        // FIXED: Use pickTargetInputContext to support preserved IC
+        auto *ic = pickTargetInputContext();
+        if (ic) {
           ic->commitString(text);
-          MKLOG(Info) << "CommitCand word=" << text << " space=0";
+          MKLOG(Info) << "CommitCand word=" << text << " program=" << ic->program();
           candidateMode_ = false;
           currentCandidates_.clear();
           sendToUI("{\"type\":\"swipe_candidates\",\"candidates\":[]}\n");
+        } else {
+          MKLOG(Warn) << "CommitCand: no IC found";
         }
       }
     }
@@ -1126,8 +1172,21 @@ void MagicKeyboardEngine::startWatchdog() {
         // Watchdog only acts when keyboard is visible or pending hide
         if (visibilityState_ == VisibilityState::Visible ||
             visibilityState_ == VisibilityState::PendingHide) {
-          auto *ic = instance_->inputContextManager().lastFocusedInputContext();
-          if (!ic || !ic->hasFocus()) {
+          // FIXED: When UI is visible, check preserved IC instead of fcitx's lastFocused
+          auto *ic = (visibilityState_ == VisibilityState::Visible && preservedIC_)
+                         ? preservedIC_
+                         : instance_->inputContextManager().lastFocusedInputContext();
+
+          // For preserved IC, we trust it's still valid even without focus
+          bool shouldHide = false;
+          if (visibilityState_ == VisibilityState::Visible && preservedIC_) {
+            // Don't auto-hide when using preserved IC - user must hide explicitly
+            shouldHide = false;
+          } else if (!ic || !ic->hasFocus()) {
+            shouldHide = true;
+          }
+
+          if (shouldHide) {
             MKLOG(Info) << "Watchdog: no focused IC found, forcing hide";
             cancelDebounce();
             executeHide();

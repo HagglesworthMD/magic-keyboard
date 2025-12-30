@@ -118,6 +118,9 @@ private:
   fcitx::InputContext *currentIC_ = nullptr;
   // Fallback cache for when currentIC_ is null (lost focus)
   fcitx::InputContext *lastFocusedIc_ = nullptr;
+  // CRITICAL: Preserved IC that survives UI focus events (emergency fix)
+  // When UI is visible, this holds the target IC for key injection
+  fcitx::InputContext *preservedIC_ = nullptr;
 
   // v0.2.2 Geometry model
   struct Point {

@@ -1,8 +1,10 @@
 #include "protocol.h"
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <poll.h>
+#include <signal.h>
 #include <string>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -10,7 +12,7 @@
 #include <unistd.h>
 
 static void usage() {
-  std::cerr << "Usage: magickeyboardctl [show|hide|toggle|ui-intent]"
+  std::cerr << "Usage: magickeyboardctl [show|hide|toggle|kill-ui|ui-intent]"
             << std::endl;
 }
 
@@ -29,6 +31,20 @@ int main(int argc, char *argv[]) {
   std::string cmd = argv[1];
   std::string msg;
   int delayMs = 0;
+
+  // Emergency kill command - does NOT use socket, sends SIGUSR1 to UI process
+  if (cmd == "kill-ui") {
+    // Use pkill to find and signal the UI process by exact name
+    int ret = std::system("pkill -USR1 -x magickeyboard-ui");
+    if (ret == 0) {
+      std::cout << "Emergency UI kill sent - focus should be restored"
+                << std::endl;
+      return 0;
+    } else {
+      std::cerr << "Failed to find UI process (magickeyboard-ui)" << std::endl;
+      return 1;
+    }
+  }
 
   if (cmd == "show") {
     msg = "{\"type\":\"ui_show\"}\n";

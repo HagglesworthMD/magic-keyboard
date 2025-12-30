@@ -22,6 +22,8 @@
 #include <QTimer>
 #include <algorithm>
 #include <cmath>
+#include <csignal>
+#include <cstdlib>
 
 class KeyboardBridge : public QObject {
   Q_OBJECT
@@ -570,7 +572,20 @@ signals:
   void swipeCandidatesReceived(const QStringList &candidates);
 };
 
+// Emergency kill handler - restores focus instantly by hard-exiting UI process
+// This is the MANDATORY escape hatch when UI steals focus and breaks typing
+static void emergencyKillHandler(int signum) {
+  if (signum == SIGUSR1) {
+    // NO Qt cleanup - immediate hard exit to restore focus
+    // fcitx5 engine process remains running
+    _exit(0);
+  }
+}
+
 int main(int argc, char *argv[]) {
+  // Register emergency kill signal BEFORE Qt init (CRITICAL for focus recovery)
+  std::signal(SIGUSR1, emergencyKillHandler);
+
   QGuiApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
   QGuiApplication app(argc, argv);
   app.setApplicationName("Magic Keyboard");
