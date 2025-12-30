@@ -1,0 +1,22 @@
+{
+  "name": "Light",
+  "id": "light",
+  "colors": {
+    "background": "#f5f5f7",
+    "keyBackground": "#ffffff",
+    "keyHover": "#e5e5ea",
+    "keyPressed": "#d1d1d6",
+    "keyBorder": "#c7c7cc",
+    "keyBorderHover": "#007aff",
+    "keyText": "#1c1c1e",
+    "specialKeyText": "#007aff",
+    "candidateBar": "#ffffff",
+    "candidateBorder": "#e5e5ea",
+    "swipeTrail": "#007aff"
+  },
+  "metrics": {
+    "cornerRadius": 10,
+    "borderWidth": 1,
+    "borderWidthHover": 2
+  }
+}

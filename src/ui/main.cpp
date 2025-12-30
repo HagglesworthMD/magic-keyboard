@@ -5,6 +5,8 @@
 
 #include <QClipboard>
 #include <QDebug>
+#include <QDir>
+#include <QFile>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -28,6 +30,29 @@
 class KeyboardBridge : public QObject {
   Q_OBJECT
   Q_PROPERTY(State state READ state NOTIFY stateChanged)
+  Q_PROPERTY(double windowOpacity READ windowOpacity NOTIFY settingsChanged)
+  Q_PROPERTY(double windowScale READ windowScale NOTIFY settingsChanged)
+  Q_PROPERTY(double swipeThreshold READ swipeThreshold NOTIFY settingsChanged)
+  Q_PROPERTY(double pathSmoothing READ pathSmoothing NOTIFY settingsChanged)
+  Q_PROPERTY(QString activeTheme READ activeTheme NOTIFY settingsChanged)
+  Q_PROPERTY(bool settingsVisible READ settingsVisible WRITE setSettingsVisible NOTIFY settingsVisibleChanged)
+
+  // Theme colors (applied from active theme)
+  Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeChanged)
+  Q_PROPERTY(QString themeKeyBackground READ themeKeyBackground NOTIFY themeChanged)
+  Q_PROPERTY(QString themeKeyHover READ themeKeyHover NOTIFY themeChanged)
+  Q_PROPERTY(QString themeKeyPressed READ themeKeyPressed NOTIFY themeChanged)
+  Q_PROPERTY(QString themeKeyBorder READ themeKeyBorder NOTIFY themeChanged)
+  Q_PROPERTY(QString themeKeyBorderHover READ themeKeyBorderHover NOTIFY themeChanged)
+  Q_PROPERTY(QString themeKeyText READ themeKeyText NOTIFY themeChanged)
+  Q_PROPERTY(QString themeSpecialKeyText READ themeSpecialKeyText NOTIFY themeChanged)
+  Q_PROPERTY(QString themeCandidateBar READ themeCandidateBar NOTIFY themeChanged)
+  Q_PROPERTY(QString themeSwipeTrail READ themeSwipeTrail NOTIFY themeChanged)
+  Q_PROPERTY(QStringList availableThemes READ availableThemes CONSTANT)
+  Q_PROPERTY(int caretX READ caretX NOTIFY caretPositionChanged)
+  Q_PROPERTY(int caretY READ caretY NOTIFY caretPositionChanged)
+  Q_PROPERTY(bool hasCaretPosition READ hasCaretPosition NOTIFY caretPositionChanged)
+  Q_PROPERTY(int snapToCaretMode READ snapToCaretMode NOTIFY settingsChanged)
 
 public:
   enum State {
@@ -88,13 +113,84 @@ public:
 
     connect(reconnectTimer_, &QTimer::timeout, this,
             &KeyboardBridge::tryConnect);
+
+    // Load default theme
+    loadTheme("default");
   }
 
   State state() const { return state_; }
 
+  // Settings getters
+  double windowOpacity() const { return windowOpacity_; }
+  double windowScale() const { return windowScale_; }
+  double swipeThreshold() const { return swipeThreshold_; }
+  double pathSmoothing() const { return pathSmoothing_; }
+  QString activeTheme() const { return activeTheme_; }
+  bool settingsVisible() const { return settingsVisible_; }
+
+  // Theme color getters
+  QString themeBackground() const { return themeColors_.value("background", "#1a1a2e"); }
+  QString themeKeyBackground() const { return themeColors_.value("keyBackground", "#2a2a4a"); }
+  QString themeKeyHover() const { return themeColors_.value("keyHover", "#3a3a6a"); }
+  QString themeKeyPressed() const { return themeColors_.value("keyPressed", "#5a5a9a"); }
+  QString themeKeyBorder() const { return themeColors_.value("keyBorder", "#4a4a6a"); }
+  QString themeKeyBorderHover() const { return themeColors_.value("keyBorderHover", "#88c0d0"); }
+  QString themeKeyText() const { return themeColors_.value("keyText", "#eceff4"); }
+  QString themeSpecialKeyText() const { return themeColors_.value("specialKeyText", "#88c0d0"); }
+  QString themeCandidateBar() const { return themeColors_.value("candidateBar", "#0f0f1a"); }
+  QString themeSwipeTrail() const { return themeColors_.value("swipeTrail", "#88c0d0"); }
+  QStringList availableThemes() const { return QStringList{"default", "dark-blue", "steam-deck", "light"}; }
+
+  // Caret position getters
+  int caretX() const { return caretX_; }
+  int caretY() const { return caretY_; }
+  bool hasCaretPosition() const { return hasCaretPosition_; }
+  int snapToCaretMode() const { return snapToCaretMode_; }
+
+  void setSettingsVisible(bool visible) {
+    if (settingsVisible_ != visible) {
+      settingsVisible_ = visible;
+      emit settingsVisibleChanged();
+    }
+  }
+
   // Helper for QML to request state changes
   Q_INVOKABLE void requestState(State newState, const QString &reason) {
     setState(newState, reason);
+  }
+
+  // Update a setting and send to engine
+  Q_INVOKABLE void updateSetting(const QString &key, double value) {
+    if (socket_->state() != QLocalSocket::ConnectedState)
+      return;
+    QString msg = QString("{\"type\":\"setting_update\",\"key\":\"%1\",\"value\":%2}\n")
+                      .arg(key)
+                      .arg(value);
+    socket_->write(msg.toUtf8());
+    socket_->flush();
+    qDebug() << "Sent setting update:" << key << "=" << value;
+  }
+
+  Q_INVOKABLE void updateStringSetting(const QString &key, const QString &value) {
+    if (socket_->state() != QLocalSocket::ConnectedState)
+      return;
+    QString msg = QString("{\"type\":\"setting_update\",\"key\":\"%1\",\"value\":\"%2\"}\n")
+                      .arg(key)
+                      .arg(value);
+    socket_->write(msg.toUtf8());
+    socket_->flush();
+    qDebug() << "Sent setting update:" << key << "=" << value;
+  }
+
+  Q_INVOKABLE void requestSettings() {
+    if (socket_->state() != QLocalSocket::ConnectedState)
+      return;
+    socket_->write("{\"type\":\"settings_request\"}\n");
+    socket_->flush();
+  }
+
+  Q_INVOKABLE void setActiveTheme(const QString &theme) {
+    updateStringSetting("active_theme", theme);
   }
 
   Q_INVOKABLE void toggleVisibility() {
@@ -525,6 +621,77 @@ private slots:
                      << "seq=" << (hasSeq ? QString::number(seq) : "missing");
             emit swipeCandidatesReceived(words);
           }
+        } else if (type == "settings" ||
+                   msg.contains("\"type\":\"settings\"")) {
+          // Parse settings from engine
+          bool changed = false;
+
+          if (obj.contains("window_opacity")) {
+            double v = obj.value("window_opacity").toDouble();
+            if (v != windowOpacity_) {
+              windowOpacity_ = v;
+              changed = true;
+            }
+          }
+          if (obj.contains("window_scale")) {
+            double v = obj.value("window_scale").toDouble();
+            if (v != windowScale_) {
+              windowScale_ = v;
+              changed = true;
+            }
+          }
+          if (obj.contains("swipe_threshold_px")) {
+            double v = obj.value("swipe_threshold_px").toDouble();
+            if (v != swipeThreshold_) {
+              swipeThreshold_ = v;
+              changed = true;
+            }
+          }
+          if (obj.contains("path_smoothing")) {
+            double v = obj.value("path_smoothing").toDouble();
+            if (v != pathSmoothing_) {
+              pathSmoothing_ = v;
+              changed = true;
+            }
+          }
+          if (obj.contains("active_theme")) {
+            QString v = obj.value("active_theme").toString();
+            if (v != activeTheme_) {
+              activeTheme_ = v;
+              changed = true;
+              // Load the new theme
+              loadTheme(v.isEmpty() ? "default" : v);
+            }
+          }
+
+          if (obj.contains("snap_to_caret_mode")) {
+            int v = obj.value("snap_to_caret_mode").toInt();
+            if (v != snapToCaretMode_) {
+              snapToCaretMode_ = v;
+              changed = true;
+            }
+          }
+
+          if (changed) {
+            qDebug() << "Settings updated: opacity=" << windowOpacity_
+                     << "scale=" << windowScale_
+                     << "swipeThreshold=" << swipeThreshold_
+                     << "theme=" << activeTheme_;
+            emit settingsChanged();
+          }
+        } else if (type == "caret_position" ||
+                   msg.contains("\"type\":\"caret_position\"")) {
+          // Parse caret position
+          bool available = obj.value("available").toBool(true);
+          if (available && obj.contains("x") && obj.contains("y")) {
+            caretX_ = obj.value("x").toInt();
+            caretY_ = obj.value("y").toInt();
+            hasCaretPosition_ = true;
+            qDebug() << "Caret position:" << caretX_ << caretY_;
+          } else {
+            hasCaretPosition_ = false;
+          }
+          emit caretPositionChanged();
         }
       }
     }
@@ -566,10 +733,72 @@ private:
   QElapsedTimer backspaceHoldElapsed_;
   bool backspaceHeld_ = false;
 
+  // Settings (synced from engine)
+  double windowOpacity_ = 1.0;
+  double windowScale_ = 1.0;
+  double swipeThreshold_ = 12.0;
+  double pathSmoothing_ = 0.35;
+  QString activeTheme_ = "";
+  bool settingsVisible_ = false;
+
+  // Theme colors
+  QMap<QString, QString> themeColors_;
+
+  // Caret position for snap-to-caret
+  int caretX_ = 0;
+  int caretY_ = 0;
+  bool hasCaretPosition_ = false;
+  int snapToCaretMode_ = 0;
+
+  void loadTheme(const QString &themeName) {
+    // Find theme file
+    QStringList searchPaths = {
+        QDir::homePath() + "/.local/share/magic-keyboard/themes/" + themeName +
+            ".json",
+        "/usr/local/share/magic-keyboard/themes/" + themeName + ".json",
+        "/usr/share/magic-keyboard/themes/" + themeName + ".json"};
+
+    for (const QString &path : searchPaths) {
+      QFile file(path);
+      if (file.open(QIODevice::ReadOnly)) {
+        QJsonParseError err;
+        QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &err);
+        if (doc.isObject()) {
+          QJsonObject colors = doc.object().value("colors").toObject();
+          themeColors_.clear();
+          for (auto it = colors.begin(); it != colors.end(); ++it) {
+            themeColors_[it.key()] = it.value().toString();
+          }
+          qDebug() << "Loaded theme:" << themeName << "from" << path;
+          emit themeChanged();
+          return;
+        }
+      }
+    }
+
+    // Use default colors if theme not found
+    themeColors_.clear();
+    themeColors_["background"] = "#1a1a2e";
+    themeColors_["keyBackground"] = "#2a2a4a";
+    themeColors_["keyHover"] = "#3a3a6a";
+    themeColors_["keyPressed"] = "#5a5a9a";
+    themeColors_["keyBorder"] = "#4a4a6a";
+    themeColors_["keyBorderHover"] = "#88c0d0";
+    themeColors_["keyText"] = "#eceff4";
+    themeColors_["specialKeyText"] = "#88c0d0";
+    themeColors_["candidateBar"] = "#0f0f1a";
+    themeColors_["swipeTrail"] = "#88c0d0";
+    emit themeChanged();
+  }
+
 signals:
   void stateChanged();
   void swipeKeysReceived(const QStringList &keys);
   void swipeCandidatesReceived(const QStringList &candidates);
+  void settingsChanged();
+  void settingsVisibleChanged();
+  void themeChanged();
+  void caretPositionChanged();
 };
 
 // Emergency kill handler - restores focus instantly by hard-exiting UI process
@@ -637,6 +866,56 @@ int main(int argc, char *argv[]) {
                                window->show();
                              }
                            });
+
+          // Caret-based positioning (snap-to-caret feature)
+          QObject::connect(
+              &bridge, &KeyboardBridge::caretPositionChanged, window,
+              [&bridge, window]() {
+                if (bridge.snapToCaretMode() == 0)
+                  return; // Snap disabled
+
+                QScreen *screen = QGuiApplication::primaryScreen();
+                if (!screen)
+                  return;
+
+                QRect r = screen->availableGeometry();
+                int w = window->width();
+                int h = window->height();
+
+                if (bridge.hasCaretPosition()) {
+                  int caretX = bridge.caretX();
+                  int caretY = bridge.caretY();
+
+                  // Mode 1: Below caret, Mode 2: Above caret, Mode 3: Smart
+                  int newX = caretX - w / 2;
+                  int newY;
+
+                  if (bridge.snapToCaretMode() == 2) {
+                    // Above caret
+                    newY = caretY - h - 20;
+                  } else if (bridge.snapToCaretMode() == 3) {
+                    // Smart: above if caret is in bottom half
+                    if (caretY > r.height() / 2) {
+                      newY = caretY - h - 20;
+                    } else {
+                      newY = caretY + 40;
+                    }
+                  } else {
+                    // Below caret (mode 1 or default)
+                    newY = caretY + 40;
+                  }
+
+                  // Clamp to screen bounds
+                  newX = qBound(r.left(), newX, r.right() - w);
+                  newY = qBound(r.top(), newY, r.bottom() - h);
+
+                  window->setPosition(newX, newY);
+                  qDebug() << "Snapped to caret:" << newX << newY;
+                } else {
+                  // Fallback: bottom center
+                  window->setPosition((r.width() - w) / 2, r.height() - h - 20);
+                }
+              });
 
           // Allow QML to initialize correctly
           if (bridge.state() != KeyboardBridge::Hidden) {

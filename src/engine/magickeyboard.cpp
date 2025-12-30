@@ -39,6 +39,13 @@ MagicKeyboardEngine::MagicKeyboardEngine(fcitx::Instance *instance)
     : instance_(instance) {
   MKLOG(Info) << "Magic Keyboard engine starting";
 
+  // Initialize settings and user learning data
+  SettingsManager::instance().load();
+  UserDataManager::instance().load();
+  MKLOG(Info) << "Loaded " << UserDataManager::instance().getUnigramCount()
+              << " unigrams, " << UserDataManager::instance().getBigramCount()
+              << " bigrams";
+
   loadLayout("qwerty");
   loadDictionary();
   startSocketServer();
@@ -369,6 +376,10 @@ void MagicKeyboardEngine::executeShow() {
   pendingIC_ = nullptr;
   ensureUIRunning();
   sendToUI("{\"type\":\"show\"}\n");
+
+  // Send caret position for snap-to-caret feature
+  sendCaretPosition(preservedIC_);
+
   MKLOG(Debug) << "Keyboard SHOWN";
 }
 
@@ -572,6 +583,8 @@ void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
         ic->commitString(currentCandidates_[0].word + " ");
         MKLOG(Info) << "CommitTop word=" << currentCandidates_[0].word
                     << " space=1";
+        // Record for adaptive learning
+        recordWordCommit(currentCandidates_[0].word);
       } else {
         ic->commitString(" ");
       }
@@ -589,6 +602,8 @@ void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
         ic->commitString(currentCandidates_[0].word);
         MKLOG(Info) << "CommitTop (Enter) word=" << currentCandidates_[0].word
                     << " space=0";
+        // Record for adaptive learning
+        recordWordCommit(currentCandidates_[0].word);
       }
       candidateMode_ = false;
       currentCandidates_.clear();
@@ -600,6 +615,8 @@ void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
         ic->commitString(currentCandidates_[0].word);
         MKLOG(Info) << "CommitTop (Implicit) word="
                     << currentCandidates_[0].word << " space=0";
+        // Record for adaptive learning
+        recordWordCommit(currentCandidates_[0].word);
       }
       candidateMode_ = false;
       currentCandidates_.clear();
@@ -891,6 +908,8 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
         if (ic) {
           ic->commitString(text);
           MKLOG(Info) << "CommitCand word=" << text << " program=" << ic->program();
+          // Record for adaptive learning
+          recordWordCommit(text);
           candidateMode_ = false;
           currentCandidates_.clear();
           sendToUI("{\"type\":\"swipe_candidates\",\"candidates\":[]}\n");
@@ -898,6 +917,34 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
           MKLOG(Warn) << "CommitCand: no IC found";
         }
       }
+    }
+  } else if (line.find("\"type\":\"settings_request\"") != std::string::npos) {
+    handleSettingsRequest(clientFd);
+  } else if (line.find("\"type\":\"setting_update\"") != std::string::npos) {
+    auto keyPos = line.find("\"key\":\"");
+    auto valPos = line.find("\"value\":");
+    if (keyPos != std::string::npos && valPos != std::string::npos) {
+      keyPos += 7;
+      auto keyEnd = line.find("\"", keyPos);
+      std::string key = line.substr(keyPos, keyEnd - keyPos);
+
+      // Parse value (could be string or number)
+      valPos += 8;
+      std::string value;
+      if (line[valPos] == '"') {
+        valPos++;
+        auto valEnd = line.find("\"", valPos);
+        value = line.substr(valPos, valEnd - valPos);
+      } else {
+        // Numeric value
+        auto valEnd = line.find_first_of(",}", valPos);
+        value = line.substr(valPos, valEnd - valPos);
+        // Trim whitespace
+        while (!value.empty() && std::isspace(value.back()))
+          value.pop_back();
+      }
+
+      handleSettingUpdate(key, value);
     }
   } else if (line.find("\"type\":\"action\"") != std::string::npos) {
     auto pos = line.find("\"action\":\"");
@@ -1106,6 +1153,11 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
           it->second->role = role;
           MKLOG(Info) << "Client " << clientFd
                       << " identified as role: " << role;
+
+          // Send current settings to UI on connect
+          if (role == "ui") {
+            sendSettingsToUI();
+          }
         }
       }
     }
@@ -1512,8 +1564,118 @@ double MagicKeyboardEngine::scoreCandidate(const std::string &keys,
   // Using log(freq) for scaling. Adding 1 to avoid log(0).
   double freqScore = std::log1p(dw.freq);
 
-  // Final formula: score = -2.2*edit + 1.0*bigrams + 0.8*freqScore
-  return -2.2 * dist + 1.0 * overlaps + 0.8 * freqScore;
+  // 4. Adaptive learning boost (unigram + bigram context)
+  double learningBoost =
+      UserDataManager::instance().getLearningBoost(dw.word, lastCommittedWord_);
+
+  // Final formula: score = -2.2*edit + 1.0*bigrams + 0.8*freqScore + learning
+  return -2.2 * dist + 1.0 * overlaps + 0.8 * freqScore + learningBoost;
+}
+
+void MagicKeyboardEngine::recordWordCommit(const std::string &word) {
+  if (word.empty())
+    return;
+
+  // Record for learning
+  UserDataManager::instance().recordCommit(word, lastCommittedWord_);
+  lastCommittedWord_ = word;
+
+  MKLOG(Debug) << "Recorded commit: " << word
+               << " (unigrams=" << UserDataManager::instance().getUnigramCount()
+               << ")";
+}
+
+void MagicKeyboardEngine::handleSettingsRequest(int clientFd) {
+  sendSettingsToUI();
+}
+
+void MagicKeyboardEngine::handleSettingUpdate(const std::string &key,
+                                               const std::string &value) {
+  if (SettingsManager::instance().setSingle(key, value)) {
+    MKLOG(Info) << "Setting updated: " << key << " = " << value;
+    sendSettingsToUI();
+  } else {
+    MKLOG(Warn) << "Unknown or invalid setting: " << key;
+  }
+}
+
+void MagicKeyboardEngine::sendSettingsToUI() {
+  Settings s = SettingsManager::instance().get();
+
+  std::string msg = "{\"type\":\"settings\","
+                    "\"swipe_threshold_px\":" +
+                    std::to_string(s.swipeThresholdPx) +
+                    ","
+                    "\"jitter_filter\":" +
+                    std::to_string(s.jitterFilter) +
+                    ","
+                    "\"path_smoothing\":" +
+                    std::to_string(s.pathSmoothing) +
+                    ","
+                    "\"key_attraction_radius\":" +
+                    std::to_string(s.keyAttractionRadius) +
+                    ","
+                    "\"window_opacity\":" +
+                    std::to_string(s.windowOpacity) +
+                    ","
+                    "\"window_scale\":" +
+                    std::to_string(s.windowScale) +
+                    ","
+                    "\"snap_to_caret_mode\":" +
+                    std::to_string(s.snapToCaretMode) +
+                    ","
+                    "\"active_theme\":\"" +
+                    s.activeTheme +
+                    "\","
+                    "\"active_layout\":\"" +
+                    s.activeLayout + "\"}\n";
+
+  sendToUI(msg);
+}
+
+void MagicKeyboardEngine::sendCaretPosition(fcitx::InputContext *ic) {
+  if (!ic)
+    return;
+
+  Settings s = SettingsManager::instance().get();
+  if (s.snapToCaretMode == 0)
+    return; // Snap disabled
+
+  // Try to get cursor rectangle from InputContext
+  // Fcitx5 stores cursor position via cursorRect() from the frontend
+  auto cursorRect = ic->cursorRect();
+
+  // Check if we have valid cursor position
+  // fcitx::Rect has x, y, width, height
+  bool hasPosition = (cursorRect.width() > 0 || cursorRect.height() > 0 ||
+                      cursorRect.left() != 0 || cursorRect.top() != 0);
+
+  if (hasPosition) {
+    std::string msg = "{\"type\":\"caret_position\","
+                      "\"x\":" +
+                      std::to_string(cursorRect.left()) +
+                      ","
+                      "\"y\":" +
+                      std::to_string(cursorRect.top()) +
+                      ","
+                      "\"width\":" +
+                      std::to_string(cursorRect.width()) +
+                      ","
+                      "\"height\":" +
+                      std::to_string(cursorRect.height()) +
+                      ","
+                      "\"mode\":" +
+                      std::to_string(s.snapToCaretMode) + "}\n";
+    sendToUI(msg);
+    MKLOG(Debug) << "Caret position: " << cursorRect.left() << ","
+                 << cursorRect.top();
+  } else {
+    // No cursor position available - send fallback message
+    std::string msg =
+        "{\"type\":\"caret_position\",\"available\":false,\"mode\":" +
+        std::to_string(s.snapToCaretMode) + "}\n";
+    sendToUI(msg);
+  }
 }
 
 std::vector<std::string> MagicKeyboardEngine::dataDirs() const {

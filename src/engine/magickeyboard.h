@@ -8,6 +8,9 @@
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/instance.h>
 
+#include "settings.h"
+#include "user_data.h"
+
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -68,6 +71,15 @@ private:
   // === Clipboard & Shortcut Agent (Agent #7) ===
   void handleShortcutAction(const std::string &action);
   bool isTerminal(const std::string &program);
+
+  // === Settings & Learning ===
+  void handleSettingsRequest(int clientFd);
+  void handleSettingUpdate(const std::string &key, const std::string &value);
+  void sendSettingsToUI();
+  void recordWordCommit(const std::string &word);
+
+  // === Snap-to-caret positioning ===
+  void sendCaretPosition(fcitx::InputContext *ic);
 
   // Watchdog to ensure keyboard hides if focus tracking fails
   void startWatchdog();
@@ -156,6 +168,9 @@ private:
   std::vector<Candidate> currentCandidates_;
   bool candidateMode_ = false;
   std::chrono::steady_clock::time_point lastToggleTime_;
+
+  // Learning context
+  std::string lastCommittedWord_;
 
   void loadLayout(const std::string &layoutName);
   void loadDictionary();

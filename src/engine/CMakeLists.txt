@@ -3,6 +3,8 @@
 add_library(magickeyboard-engine MODULE
     magickeyboard.cpp
     swipe_engine.cpp
+    settings.cpp
+    user_data.cpp
 )
 
 target_link_libraries(magickeyboard-engine

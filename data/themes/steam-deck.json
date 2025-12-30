@@ -1,0 +1,22 @@
+{
+  "name": "Steam Deck",
+  "id": "steam-deck",
+  "colors": {
+    "background": "#1a1f2c",
+    "keyBackground": "#23262e",
+    "keyHover": "#2d3140",
+    "keyPressed": "#3d4255",
+    "keyBorder": "#353945",
+    "keyBorderHover": "#1a9fff",
+    "keyText": "#ffffff",
+    "specialKeyText": "#1a9fff",
+    "candidateBar": "#14171f",
+    "candidateBorder": "#23262e",
+    "swipeTrail": "#1a9fff"
+  },
+  "metrics": {
+    "cornerRadius": 6,
+    "borderWidth": 1,
+    "borderWidthHover": 2
+  }
+}

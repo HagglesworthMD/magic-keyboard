@@ -46,6 +46,8 @@ namespace msg_type {
     constexpr std::string_view SWIPE_END = "swipe_end";
     constexpr std::string_view ACTION = "action";
     constexpr std::string_view CANDIDATE_SELECT = "candidate_select";
+    constexpr std::string_view SETTING_UPDATE = "setting_update";
+    constexpr std::string_view SETTINGS_REQUEST = "settings_request";
 }
 
 // Engine → UI message types
@@ -54,6 +56,8 @@ namespace cmd_type {
     constexpr std::string_view HIDE = "hide";
     constexpr std::string_view CANDIDATES = "candidates";
     constexpr std::string_view PREEDIT = "preedit";
+    constexpr std::string_view SETTINGS = "settings";
+    constexpr std::string_view THEME_LIST = "theme_list";
 }
 
 // Action names

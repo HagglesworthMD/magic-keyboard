@@ -16,13 +16,18 @@ import QtQuick.Layouts
 
 Window {
     id: keyboard
-    
-    // Steam Deck optimized dimensions
-    width: 1200
-    height: 320
+
+    // Steam Deck optimized dimensions (base values, affected by scale)
+    readonly property real baseWidth: 1200
+    readonly property real baseHeight: 320
+    width: baseWidth * bridge.windowScale
+    height: baseHeight * bridge.windowScale
     visible: false
-    color: "#1a1a2e"
+    color: "transparent"  // Allow opacity control
     title: "Magic Keyboard"
+
+    // Opacity from settings
+    opacity: bridge.windowOpacity
     
     // ═══════════════════════════════════════════════════════════════════
     // GEOMETRY MODEL
@@ -57,10 +62,10 @@ Window {
     property var debugKeys: []
     property var swipeCandidates: []
     
-    // Swipe configuration
-    readonly property real deadzone: 12 * scaleFactor
+    // Swipe configuration (from settings)
+    readonly property real deadzone: bridge.swipeThreshold * scaleFactor
     readonly property real timeThreshold: 40  // ms
-    readonly property real smoothingAlpha: 0.35
+    readonly property real smoothingAlpha: bridge.pathSmoothing
     readonly property real resampleDist: 8 * scaleFactor
     
     // ═══════════════════════════════════════════════════════════════════
@@ -85,33 +90,33 @@ Window {
         
         Rectangle {
             id: keyVisual
-            
+
             // Center within hit zone
             anchors.centerIn: parent
             width: keyRoot.kw * keyboard.gridUnit
             height: keyboard.keyHeight
             radius: keyboard.cornerRadius
-            
+
             // Visual states - NO animation on hover-in (instant feedback)
             color: {
-                if (keyRoot.isPressed) return "#5a5a9a";
-                if (keyRoot.isHovered) return "#3a3a6a";
-                return "#2a2a4a";
+                if (keyRoot.isPressed) return bridge.themeKeyPressed;
+                if (keyRoot.isHovered) return bridge.themeKeyHover;
+                return bridge.themeKeyBackground;
             }
-            
+
             border.width: keyRoot.isHovered ? 2 : 1
-            border.color: keyRoot.isHovered ? "#88c0d0" : "#4a4a6a"
-            
+            border.color: keyRoot.isHovered ? bridge.themeKeyBorderHover : bridge.themeKeyBorder
+
             // Subtle press animation only
             scale: keyRoot.isPressed ? 0.96 : 1.0
             Behavior on scale { NumberAnimation { duration: 40 } }
-            
+
             // Minimal transition for aesthetics on hover-out only
             Behavior on color {
                 enabled: !keyRoot.isHovered
                 ColorAnimation { duration: 60 }
             }
-            
+
             Text {
                 anchors.centerIn: parent
                 text: {
@@ -119,21 +124,21 @@ Window {
                         return keyRoot.label.toUpperCase();
                     return keyRoot.label;
                 }
-                color: keyRoot.special || keyRoot.action ? "#88c0d0" : "#eceff4"
+                color: keyRoot.special || keyRoot.action ? bridge.themeSpecialKeyText : bridge.themeKeyText
                 font {
                     family: "Inter, Roboto, sans-serif"
                     pixelSize: (keyRoot.special || keyRoot.action) ? 14 * keyboard.scaleFactor : 20 * keyboard.scaleFactor
                     weight: Font.Medium
                 }
             }
-            
+
             // Hover glow effect
             Rectangle {
                 anchors.fill: parent
                 radius: parent.radius
                 color: "transparent"
                 border.width: keyRoot.isHovered ? 1 : 0
-                border.color: "#88c0d0"
+                border.color: bridge.themeKeyBorderHover
                 opacity: 0.3
                 anchors.margins: -2
                 visible: keyRoot.isHovered
@@ -221,13 +226,18 @@ Window {
             var ctx = getContext("2d");
             ctx.clearRect(0, 0, width, height);
             if (keyboard.currentPath.length < 2) return;
-            
-            // Smooth trail with consistent stroke
-            ctx.strokeStyle = Qt.rgba(0.533, 0.753, 0.816, trailOpacity);
+
+            // Smooth trail with consistent stroke using theme color
+            var trailColor = bridge.themeSwipeTrail;
+            // Parse hex color and apply opacity
+            var r = parseInt(trailColor.slice(1, 3), 16) / 255;
+            var g = parseInt(trailColor.slice(3, 5), 16) / 255;
+            var b = parseInt(trailColor.slice(5, 7), 16) / 255;
+            ctx.strokeStyle = Qt.rgba(r, g, b, trailOpacity);
             ctx.lineWidth = 4 * keyboard.scaleFactor;
             ctx.lineCap = "round";
             ctx.lineJoin = "round";
-            
+
             ctx.beginPath();
             ctx.moveTo(keyboard.currentPath[0].wx, keyboard.currentPath[0].wy);
             for (var i = 1; i < keyboard.currentPath.length; i++) {
@@ -338,9 +348,91 @@ Window {
     }
     
     // ═══════════════════════════════════════════════════════════════════
+    // BACKGROUND (for transparency support)
+    // ═══════════════════════════════════════════════════════════════════
+
+    Rectangle {
+        id: keyboardBackground
+        anchors.fill: parent
+        color: bridge.themeBackground
+        radius: 12 * keyboard.scaleFactor
+
+        // Subtle border for visibility at low opacity
+        border.color: bridge.themeKeyBorder
+        border.width: 1
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // RESIZE HANDLES
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Corner resize handle (bottom-right)
+    Rectangle {
+        id: resizeHandle
+        width: 24 * keyboard.scaleFactor
+        height: 24 * keyboard.scaleFactor
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 4
+        color: resizeArea.containsMouse ? "#5a5a9a" : "transparent"
+        radius: 4
+
+        // Resize indicator lines
+        Canvas {
+            anchors.fill: parent
+            onPaint: {
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+                ctx.strokeStyle = "#88c0d0";
+                ctx.lineWidth = 2;
+                ctx.lineCap = "round";
+
+                // Draw diagonal lines
+                for (var i = 0; i < 3; i++) {
+                    var offset = 6 + i * 5;
+                    ctx.beginPath();
+                    ctx.moveTo(width - 4, offset);
+                    ctx.lineTo(offset, height - 4);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        MouseArea {
+            id: resizeArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.SizeFDiagCursor
+
+            property point startPos
+            property real startWidth
+            property real startHeight
+
+            onPressed: (mouse) => {
+                startPos = Qt.point(mouse.x, mouse.y);
+                startWidth = keyboard.width;
+                startHeight = keyboard.height;
+            }
+
+            onPositionChanged: (mouse) => {
+                if (!pressed) return;
+
+                var dx = mouse.x - startPos.x;
+                var dy = mouse.y - startPos.y;
+
+                // Maintain aspect ratio
+                var newScale = Math.max(0.5, Math.min(2.0,
+                    bridge.windowScale + (dx + dy) / 400));
+
+                bridge.updateSetting("window_scale", newScale);
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // LAYOUT
     // ═══════════════════════════════════════════════════════════════════
-    
+
     ColumnLayout {
         id: mainLayout
         anchors.fill: parent
@@ -355,31 +447,31 @@ Window {
             id: candidateBar
             Layout.fillWidth: true
             height: 48 * keyboard.scaleFactor
-            color: "#0f0f1a"
+            color: bridge.themeCandidateBar
             radius: keyboard.cornerRadius
-            border.color: "#2a2a4a"
+            border.color: bridge.themeKeyBorder
             border.width: 1
             
             // Status text (when no candidates)
             Text {
                 anchors.centerIn: parent
                 visible: !keyboard.isSwiping && keyboard.swipeCandidates.length === 0
-                text: keyboard.debugKeys.length > 0 
-                    ? keyboard.debugKeys.join(" → ") 
+                text: keyboard.debugKeys.length > 0
+                    ? keyboard.debugKeys.join(" → ")
                     : "Swipe to type"
-                color: keyboard.debugKeys.length > 0 ? "#88c0d0" : "#555"
+                color: keyboard.debugKeys.length > 0 ? bridge.themeSpecialKeyText : "#555"
                 font {
                     family: "Inter, Roboto, sans-serif"
                     pixelSize: 14 * keyboard.scaleFactor
                 }
             }
-            
+
             // Swiping indicator
             Text {
                 anchors.centerIn: parent
                 visible: keyboard.isSwiping
                 text: "Swiping..."
-                color: "#88c0d0"
+                color: bridge.themeSpecialKeyText
                 font {
                     family: "Inter, Roboto, sans-serif"
                     pixelSize: 16 * keyboard.scaleFactor
@@ -396,30 +488,55 @@ Window {
                 
                 Repeater {
                     model: keyboard.swipeCandidates
-                    
+
                     Rectangle {
+                        id: candRect
                         Layout.fillHeight: true
-                        Layout.preferredWidth: Math.max(80 * keyboard.scaleFactor, candText.implicitWidth + 24)
-                        color: candMa.pressed ? "#4a4a8a" : (candMa.containsMouse ? "#3a3a5a" : "#2a2a4a")
-                        radius: 6 * keyboard.scaleFactor
-                        border.color: candMa.containsMouse ? "#88c0d0" : "#3a3a5a"
-                        border.width: candMa.containsMouse ? 2 : 1
-                        
-                        Text {
-                            id: candText
+                        Layout.preferredWidth: Math.max(80 * keyboard.scaleFactor, candText.implicitWidth + 28)
+
+                        // First candidate gets special highlight
+                        property bool isTopPick: index === 0
+
+                        color: candMa.pressed ? bridge.themeKeyPressed :
+                               (candMa.containsMouse ? bridge.themeKeyHover :
+                               (isTopPick ? bridge.themeKeyHover : bridge.themeKeyBackground))
+                        radius: 8 * keyboard.scaleFactor
+                        border.color: candMa.containsMouse || isTopPick ? bridge.themeKeyBorderHover : bridge.themeKeyBorder
+                        border.width: candMa.containsMouse ? 2 : (isTopPick ? 2 : 1)
+
+                        // Subtle scale animation on press
+                        scale: candMa.pressed ? 0.95 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 50 } }
+
+                        RowLayout {
                             anchors.centerIn: parent
-                            text: modelData
-                            color: "#eceff4"
-                            font {
-                                family: "Inter, Roboto, sans-serif"
-                                pixelSize: 16 * keyboard.scaleFactor
+                            spacing: 4
+
+                            // Top pick indicator
+                            Text {
+                                visible: candRect.isTopPick
+                                text: "★"
+                                color: bridge.themeSpecialKeyText
+                                font.pixelSize: 10 * keyboard.scaleFactor
+                            }
+
+                            Text {
+                                id: candText
+                                text: modelData
+                                color: candRect.isTopPick ? bridge.themeSpecialKeyText : bridge.themeKeyText
+                                font {
+                                    family: "Inter, Roboto, sans-serif"
+                                    pixelSize: 16 * keyboard.scaleFactor
+                                    weight: candRect.isTopPick ? Font.Bold : Font.Normal
+                                }
                             }
                         }
-                        
+
                         MouseArea {
                             id: candMa
                             anchors.fill: parent
                             hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 bridge.commitCandidate(modelData);
                                 keyboard.swipeCandidates = [];
@@ -499,12 +616,417 @@ Window {
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 0
-                
+
                 KeyBtn { label: "Copy"; code: "copy"; kw: 1.25; action: true }
                 KeyBtn { label: "Paste"; code: "paste"; kw: 1.25; action: true }
                 KeyBtn { label: ""; code: "space"; kw: 5.0; special: true }
                 KeyBtn { label: "Cut"; code: "cut"; kw: 1.25; action: true }
                 KeyBtn { label: "SelAll"; code: "selectall"; kw: 1.25; action: true }
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // SETTINGS BUTTON (top-left corner)
+    // ═══════════════════════════════════════════════════════════════════
+
+    Rectangle {
+        id: settingsButton
+        width: 32 * keyboard.scaleFactor
+        height: 32 * keyboard.scaleFactor
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.margins: 8
+        color: settingsButtonArea.containsMouse ? "#3a3a6a" : "#2a2a4a"
+        radius: 6
+        border.color: settingsButtonArea.containsMouse ? "#88c0d0" : "#4a4a6a"
+        border.width: 1
+        z: 200
+
+        Text {
+            anchors.centerIn: parent
+            text: "⚙"
+            color: "#88c0d0"
+            font.pixelSize: 18 * keyboard.scaleFactor
+        }
+
+        MouseArea {
+            id: settingsButtonArea
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: bridge.settingsVisible = !bridge.settingsVisible
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // SETTINGS PANEL
+    // ═══════════════════════════════════════════════════════════════════
+
+    Rectangle {
+        id: settingsPanel
+        visible: bridge.settingsVisible
+        width: 300 * keyboard.scaleFactor
+        height: parent.height - 20
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.margins: 10
+        color: "#0f0f1a"
+        radius: 12 * keyboard.scaleFactor
+        border.color: "#3a3a5a"
+        border.width: 1
+        z: 150
+
+        // Prevent clicks from passing through
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {} // Absorb click
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 16 * keyboard.scaleFactor
+            spacing: 12 * keyboard.scaleFactor
+
+            // Header
+            RowLayout {
+                Layout.fillWidth: true
+
+                Text {
+                    text: "Settings"
+                    color: "#eceff4"
+                    font {
+                        family: "Inter, Roboto, sans-serif"
+                        pixelSize: 18 * keyboard.scaleFactor
+                        weight: Font.Bold
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    width: 28 * keyboard.scaleFactor
+                    height: 28 * keyboard.scaleFactor
+                    color: closeArea.containsMouse ? "#5a5a9a" : "transparent"
+                    radius: 4
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "✕"
+                        color: "#88c0d0"
+                        font.pixelSize: 16 * keyboard.scaleFactor
+                    }
+
+                    MouseArea {
+                        id: closeArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: bridge.settingsVisible = false
+                    }
+                }
+            }
+
+            // Divider
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: "#3a3a5a"
+            }
+
+            // Opacity slider
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                RowLayout {
+                    Text {
+                        text: "Opacity"
+                        color: "#88c0d0"
+                        font.pixelSize: 14 * keyboard.scaleFactor
+                    }
+                    Item { Layout.fillWidth: true }
+                    Text {
+                        text: Math.round(bridge.windowOpacity * 100) + "%"
+                        color: "#eceff4"
+                        font.pixelSize: 14 * keyboard.scaleFactor
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 24 * keyboard.scaleFactor
+                    color: "#2a2a4a"
+                    radius: 4
+
+                    Rectangle {
+                        width: parent.width * (bridge.windowOpacity - 0.3) / 0.7
+                        height: parent.height
+                        color: "#5a5a9a"
+                        radius: 4
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: (mouse) => {
+                            var value = 0.3 + (mouse.x / width) * 0.7;
+                            value = Math.max(0.3, Math.min(1.0, value));
+                            bridge.updateSetting("window_opacity", value);
+                        }
+                        onPositionChanged: (mouse) => {
+                            if (!pressed) return;
+                            var value = 0.3 + (mouse.x / width) * 0.7;
+                            value = Math.max(0.3, Math.min(1.0, value));
+                            bridge.updateSetting("window_opacity", value);
+                        }
+                    }
+                }
+            }
+
+            // Scale slider
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                RowLayout {
+                    Text {
+                        text: "Size"
+                        color: "#88c0d0"
+                        font.pixelSize: 14 * keyboard.scaleFactor
+                    }
+                    Item { Layout.fillWidth: true }
+                    Text {
+                        text: Math.round(bridge.windowScale * 100) + "%"
+                        color: "#eceff4"
+                        font.pixelSize: 14 * keyboard.scaleFactor
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 24 * keyboard.scaleFactor
+                    color: "#2a2a4a"
+                    radius: 4
+
+                    Rectangle {
+                        width: parent.width * (bridge.windowScale - 0.5) / 1.5
+                        height: parent.height
+                        color: "#5a5a9a"
+                        radius: 4
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: (mouse) => {
+                            var value = 0.5 + (mouse.x / width) * 1.5;
+                            value = Math.max(0.5, Math.min(2.0, value));
+                            bridge.updateSetting("window_scale", value);
+                        }
+                        onPositionChanged: (mouse) => {
+                            if (!pressed) return;
+                            var value = 0.5 + (mouse.x / width) * 1.5;
+                            value = Math.max(0.5, Math.min(2.0, value));
+                            bridge.updateSetting("window_scale", value);
+                        }
+                    }
+                }
+            }
+
+            // Swipe sensitivity slider
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                RowLayout {
+                    Text {
+                        text: "Swipe Sensitivity"
+                        color: "#88c0d0"
+                        font.pixelSize: 14 * keyboard.scaleFactor
+                    }
+                    Item { Layout.fillWidth: true }
+                    Text {
+                        text: Math.round(bridge.swipeThreshold) + "px"
+                        color: "#eceff4"
+                        font.pixelSize: 14 * keyboard.scaleFactor
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 24 * keyboard.scaleFactor
+                    color: "#2a2a4a"
+                    radius: 4
+
+                    Rectangle {
+                        // Inverted: lower threshold = more sensitive
+                        width: parent.width * (1 - (bridge.swipeThreshold - 5) / 45)
+                        height: parent.height
+                        color: "#5a5a9a"
+                        radius: 4
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: (mouse) => {
+                            // Inverted slider: right = more sensitive (lower threshold)
+                            var value = 50 - (mouse.x / width) * 45;
+                            value = Math.max(5, Math.min(50, value));
+                            bridge.updateSetting("swipe_threshold_px", value);
+                        }
+                        onPositionChanged: (mouse) => {
+                            if (!pressed) return;
+                            var value = 50 - (mouse.x / width) * 45;
+                            value = Math.max(5, Math.min(50, value));
+                            bridge.updateSetting("swipe_threshold_px", value);
+                        }
+                    }
+                }
+            }
+
+            // Path smoothing slider
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                RowLayout {
+                    Text {
+                        text: "Path Smoothing"
+                        color: "#88c0d0"
+                        font.pixelSize: 14 * keyboard.scaleFactor
+                    }
+                    Item { Layout.fillWidth: true }
+                    Text {
+                        text: Math.round(bridge.pathSmoothing * 100) + "%"
+                        color: "#eceff4"
+                        font.pixelSize: 14 * keyboard.scaleFactor
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 24 * keyboard.scaleFactor
+                    color: "#2a2a4a"
+                    radius: 4
+
+                    Rectangle {
+                        width: parent.width * bridge.pathSmoothing
+                        height: parent.height
+                        color: "#5a5a9a"
+                        radius: 4
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: (mouse) => {
+                            var value = mouse.x / width;
+                            value = Math.max(0, Math.min(1.0, value));
+                            bridge.updateSetting("path_smoothing", value);
+                        }
+                        onPositionChanged: (mouse) => {
+                            if (!pressed) return;
+                            var value = mouse.x / width;
+                            value = Math.max(0, Math.min(1.0, value));
+                            bridge.updateSetting("path_smoothing", value);
+                        }
+                    }
+                }
+            }
+
+            // Theme selector
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                Text {
+                    text: "Theme"
+                    color: "#88c0d0"
+                    font.pixelSize: 14 * keyboard.scaleFactor
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6 * keyboard.scaleFactor
+
+                    Repeater {
+                        model: bridge.availableThemes
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 32 * keyboard.scaleFactor
+                            color: themeBtnArea.containsMouse ? "#3a3a5a" : (bridge.activeTheme === modelData || (bridge.activeTheme === "" && modelData === "default") ? "#4a4a7a" : "#2a2a4a")
+                            radius: 6 * keyboard.scaleFactor
+                            border.color: (bridge.activeTheme === modelData || (bridge.activeTheme === "" && modelData === "default")) ? "#88c0d0" : "#3a3a5a"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData.charAt(0).toUpperCase() + modelData.slice(1)
+                                color: "#eceff4"
+                                font.pixelSize: 11 * keyboard.scaleFactor
+                            }
+
+                            MouseArea {
+                                id: themeBtnArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: bridge.setActiveTheme(modelData)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Snap-to-caret selector
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                Text {
+                    text: "Position Mode"
+                    color: "#88c0d0"
+                    font.pixelSize: 14 * keyboard.scaleFactor
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6 * keyboard.scaleFactor
+
+                    Repeater {
+                        model: ["Fixed", "Below", "Above", "Smart"]
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 28 * keyboard.scaleFactor
+                            color: snapBtnArea.containsMouse ? "#3a3a5a" : (bridge.snapToCaretMode === index ? "#4a4a7a" : "#2a2a4a")
+                            radius: 6 * keyboard.scaleFactor
+                            border.color: bridge.snapToCaretMode === index ? "#88c0d0" : "#3a3a5a"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData
+                                color: "#eceff4"
+                                font.pixelSize: 10 * keyboard.scaleFactor
+                            }
+
+                            MouseArea {
+                                id: snapBtnArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: bridge.updateSetting("snap_to_caret_mode", index)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Spacer
+            Item { Layout.fillHeight: true }
+
+            // Version info
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                text: "Magic Keyboard v0.2"
+                color: "#555"
+                font.pixelSize: 11 * keyboard.scaleFactor
             }
         }
     }

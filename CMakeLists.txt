@@ -80,7 +80,7 @@ add_subdirectory(src/engine)
 add_subdirectory(src/ui)
 
 # Install data files
-install(DIRECTORY data/layouts data/dict
+install(DIRECTORY data/layouts data/dict data/themes
     DESTINATION ${MAGIC_KEYBOARD_DATA_DIR}
 )
 
