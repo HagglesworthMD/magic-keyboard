@@ -362,6 +362,7 @@ Window {
                     } else {
                         root.sendKey(root.activeKey.code)
                     }
+                 }
             } else {
                 console.log("Gesture rejected")
             }

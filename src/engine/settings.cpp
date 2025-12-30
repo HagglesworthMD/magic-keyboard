@@ -7,6 +7,7 @@
 
 #include "settings.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
