@@ -111,6 +111,24 @@ install(FILES packaging/systemd/fcitx5.service DESTINATION ${SYSTEMD_USER_UNIT_D
 # Install fcitx5 launcher script (escapes namespace sandboxing on SteamOS)
 install(PROGRAMS packaging/scripts/fcitx5-launch.sh DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+# Install Magic Keyboard helper scripts
+# start-magic-keyboard: User-facing command to start/restart Magic Keyboard
+install(PROGRAMS packaging/scripts/start-magic-keyboard.sh
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    RENAME start-magic-keyboard)
+
+# Configure input method script (called by installer, also available to users)
+install(PROGRAMS packaging/scripts/configure-input-method.sh
+    DESTINATION ${MAGIC_KEYBOARD_DATA_DIR})
+
+# Also install start script to data dir for install script to find
+install(PROGRAMS packaging/scripts/start-magic-keyboard.sh
+    DESTINATION ${MAGIC_KEYBOARD_DATA_DIR})
+
+# Install fcitx5 environment setup script (sets IM module environment variables)
+install(PROGRAMS packaging/scripts/fcitx5-env.sh
+    DESTINATION ${MAGIC_KEYBOARD_DATA_DIR})
+
 # Desktop Entries
 if(MAGICKEYBOARD_INSTALL_DESKTOP)
     configure_file(packaging/applications/magickeyboard.desktop.in magickeyboard.desktop @ONLY)

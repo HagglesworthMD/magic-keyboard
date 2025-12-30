@@ -96,7 +96,7 @@ echo -e "${GREEN}✓ Installation complete${NC}"
 echo ""
 
 # Step 6: Post-installation setup
-echo -e "${BOLD}[6/6] Setting up environment...${NC}"
+echo -e "${BOLD}[6/7] Setting up environment...${NC}"
 
 # Create plasma-workspace env directory
 mkdir -p ~/.config/plasma-workspace/env
@@ -127,23 +127,107 @@ if command -v flatpak &> /dev/null; then
 fi
 
 echo ""
+
+# Step 7: Configure input method (NEW - automatic!)
+echo -e "${BOLD}[7/7] Configuring Magic Keyboard as default input method...${NC}"
+
+# Run the configuration script
+if [[ -f /usr/local/share/magic-keyboard/configure-input-method.sh ]]; then
+    bash /usr/local/share/magic-keyboard/configure-input-method.sh
+else
+    # Fallback: inline configuration if script not installed yet
+    FCITX5_CONFIG_DIR="${HOME}/.config/fcitx5"
+    mkdir -p "${FCITX5_CONFIG_DIR}"
+
+    # Create Fcitx5 profile with Magic Keyboard
+    cat > "${FCITX5_CONFIG_DIR}/profile" << 'PROFILE_EOF'
+[Groups/0]
+Name=Default
+Default Layout=us
+DefaultIM=magic-keyboard
+
+[Groups/0/Items/0]
+Name=keyboard-us
+Layout=
+
+[Groups/0/Items/1]
+Name=magic-keyboard
+Layout=
+
+[GroupOrder]
+0=Default
+PROFILE_EOF
+
+    echo -e "${GREEN}✓ Created Fcitx5 profile with Magic Keyboard${NC}"
+
+    # Create symlinks for addon discovery
+    mkdir -p "${HOME}/.local/share/fcitx5/addon"
+    mkdir -p "${HOME}/.local/share/fcitx5/inputmethod"
+
+    ln -sf /usr/local/share/fcitx5/addon/magickeyboard.conf \
+        "${HOME}/.local/share/fcitx5/addon/magickeyboard.conf" 2>/dev/null || true
+    ln -sf /usr/local/share/fcitx5/inputmethod/magickeyboard.conf \
+        "${HOME}/.local/share/fcitx5/inputmethod/magickeyboard.conf" 2>/dev/null || true
+fi
+
+echo -e "${GREEN}✓ Input method configured automatically${NC}"
+echo ""
+
 echo -e "${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║               Installation Successful! 🎉                     ║${NC}"
+echo -e "${BOLD}║               Installation Successful!                        ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${BOLD}IMPORTANT: Complete these final steps:${NC}"
+
+# Ask if user wants to start Magic Keyboard now
+echo -e "${BOLD}Would you like to start Magic Keyboard now?${NC}"
+echo "This will start Fcitx5 and the keyboard UI immediately."
 echo ""
-echo "1. Add 'Magic Keyboard' in System Settings:"
-echo "   ${BOLD}System Settings → Input Method → Add 'Magic Keyboard'${NC}"
-echo ""
-echo "2. Log out and log back in (or reboot) for changes to take effect"
-echo ""
-echo "3. After logging back in, verify the installation:"
-echo "   ${BOLD}magic-keyboard-verify${NC}"
-echo ""
-echo "4. To manually control the keyboard:"
-echo "   ${BOLD}magickeyboardctl toggle${NC}"
-echo ""
-echo "For detailed instructions:"
-echo "   /usr/local/share/doc/magic-keyboard/post-install.txt"
+read -p "Start now? [Y/n]: " START_NOW
+START_NOW=${START_NOW:-Y}
+
+if [[ "${START_NOW}" =~ ^[Yy]$ ]]; then
+    echo ""
+    if [[ -f /usr/local/share/magic-keyboard/start-magic-keyboard.sh ]]; then
+        bash /usr/local/share/magic-keyboard/start-magic-keyboard.sh
+    else
+        # Inline startup
+        echo -e "${BOLD}Starting Magic Keyboard...${NC}"
+
+        # Set environment for this session
+        export GTK_IM_MODULE=fcitx
+        export QT_IM_MODULE=fcitx
+        export XMODIFIERS=@im=fcitx
+        export DISPLAY="${DISPLAY:-:0}"
+
+        # Start Fcitx5
+        pkill -x fcitx5 2>/dev/null || true
+        sleep 1
+        fcitx5 -d --replace 2>/dev/null &
+        sleep 2
+
+        # Start UI
+        systemctl --user restart magickeyboard-ui 2>/dev/null || \
+            /usr/local/bin/magickeyboard-ui &
+
+        echo -e "${GREEN}✓ Magic Keyboard started!${NC}"
+    fi
+    echo ""
+    echo -e "${GREEN}Magic Keyboard is now running!${NC}"
+    echo "  • Click in any text field - keyboard should appear"
+    echo "  • Run 'magickeyboardctl toggle' to show/hide manually"
+    echo ""
+else
+    echo ""
+    echo -e "${BOLD}To start Magic Keyboard later:${NC}"
+    echo "  Option 1: Log out and log back in"
+    echo "  Option 2: Run: ${BOLD}start-magic-keyboard${NC}"
+    echo ""
+fi
+
+echo -e "${BOLD}Useful commands:${NC}"
+echo "  ${BOLD}magickeyboardctl toggle${NC}  - Show/hide keyboard"
+echo "  ${BOLD}magickeyboardctl show${NC}    - Show keyboard"
+echo "  ${BOLD}magickeyboardctl hide${NC}    - Hide keyboard"
+echo "  ${BOLD}magic-keyboard-verify${NC}    - Check installation health"
+echo "  ${BOLD}start-magic-keyboard${NC}     - Start/restart Magic Keyboard"
 echo ""
