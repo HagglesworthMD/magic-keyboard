@@ -3,6 +3,7 @@
 add_library(magickeyboard-engine MODULE
     magickeyboard.cpp
     swipe_engine.cpp
+    shark2.cpp
     settings.cpp
     user_data.cpp
 )
