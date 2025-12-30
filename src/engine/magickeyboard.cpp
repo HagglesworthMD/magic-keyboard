@@ -1103,43 +1103,74 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
       }
     }
 
-    if (!path.empty()) {
+    // Check for UI-provided keys first
+    std::string keysString;
+    size_t ui_keys_pos = line.find("\"ui_keys\":[");
+    if (ui_keys_pos != std::string::npos) {
+      // Parse UI-provided keys array
+      size_t arr_start = ui_keys_pos + 11;
+      size_t arr_end = line.find("]", arr_start);
+      if (arr_end != std::string::npos) {
+        std::string arr_content = line.substr(arr_start, arr_end - arr_start);
+        // Parse ["a","b","c"] format
+        size_t pos = 0;
+        while ((pos = arr_content.find("\"", pos)) != std::string::npos) {
+          size_t end = arr_content.find("\"", pos + 1);
+          if (end != std::string::npos && end > pos + 1) {
+            std::string key = arr_content.substr(pos + 1, end - pos - 1);
+            if (key.length() == 1 && std::isalpha(key[0])) {
+              keysString += std::tolower(key[0]);
+            }
+            pos = end + 1;
+          } else {
+            break;
+          }
+        }
+      }
+      MKLOG(Info) << "Swipe keys from UI: " << keysString;
+    } else if (!path.empty()) {
+      // Fallback to coordinate-based mapping
       auto seq = mapPathToSequence(path);
-      std::string keysString;
-      for (const auto &s : seq)
-        keysString += s;
+      for (const auto &s : seq) {
+        if (s.length() == 1 && std::isalpha(s[0])) {
+          keysString += std::tolower(s[0]);
+        }
+      }
+      MKLOG(Info) << "Swipe keys from path: " << keysString << " (from " << seq.size() << " raw keys)";
+    }
 
-      auto candidates = generateCandidates(keysString, path.size());
+    if (!keysString.empty()) {
+      auto candidates = generateCandidates(keysString, path.size() > 0 ? path.size() : keysString.size());
+
+      // Auto-commit: immediately commit the top candidate with a space
+      if (!candidates.empty()) {
+        auto *ic = pickTargetInputContext();
+        if (ic) {
+          std::string word = candidates[0].word + " ";
+          ic->commitString(word);
+          MKLOG(Info) << "AutoCommit swipe word=" << candidates[0].word;
+          recordWordCommit(candidates[0].word);
+          candidateMode_ = false;
+          currentCandidates_.clear();
+        }
+      }
 
       // Send keys for debug highlight with sequence echo
       std::string msgKeys =
           "{\"type\":\"swipe_keys\",\"seq\":" + std::to_string(seq_num) +
           ",\"keys\":[";
-      for (size_t i = 0; i < seq.size(); ++i) {
-        msgKeys += "\"" + seq[i] + "\"";
-        if (i < seq.size() - 1)
+      for (size_t i = 0; i < keysString.size(); ++i) {
+        msgKeys += "\"";
+        msgKeys += keysString[i];
+        msgKeys += "\"";
+        if (i < keysString.size() - 1)
           msgKeys += ",";
       }
       msgKeys += "]}\n";
       sendToUI(msgKeys);
 
-      // Send candidates with sequence echo
-      std::string msgCands =
-          "{\"type\":\"swipe_candidates\",\"seq\":" + std::to_string(seq_num) +
-          ",\"candidates\":[";
-      for (size_t i = 0; i < candidates.size(); ++i) {
-        msgCands += "{\"w\":\"" + candidates[i].word + "\"}";
-        if (i < candidates.size() - 1)
-          msgCands += ",";
-      }
-      msgCands += "],\"keys\":[";
-      for (size_t i = 0; i < seq.size(); ++i) {
-        msgCands += "\"" + seq[i] + "\"";
-        if (i < seq.size() - 1)
-          msgCands += ",";
-      }
-      msgCands += "]}\n";
-      sendToUI(msgCands);
+      // Clear candidates in UI since we auto-committed
+      sendToUI("{\"type\":\"swipe_candidates\",\"candidates\":[]}\n");
     }
   } else if (line.find("\"type\":\"hello\"") != std::string::npos) {
     auto pos = line.find("\"role\":\"");

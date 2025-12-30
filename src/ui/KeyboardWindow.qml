@@ -17,7 +17,7 @@ Window {
     title: "Magic Keyboard"
     
     property bool shiftActive: false
-    
+
     // Swipe state ... (unchanged)
     property var currentPath: []
     property bool isSwiping: false
@@ -25,7 +25,9 @@ Window {
     property real startTime: 0
     property var activeKey: null
     property var hoverKey: null
-    
+    property var swipeKeySequence: []  // Keys touched during swipe
+    property var lastSwipeKey: null    // For deduplication
+
     property var debugKeys: []
     property var swipeCandidates: []
     
@@ -137,12 +139,31 @@ Window {
     }
 
     function getKeyAt(x, y) {
-        let item = keysContainer.childAt(x - keysContainer.x, y - keysContainer.y)
-        while (item && !item.isKeyBtn) {
-            // Traverse up layouts
-            item = item.parent
+        // Recursive search through all descendants to find KeyBtn at position
+        function findKeyRecursive(parent, px, py) {
+            if (!parent || !parent.children) return null
+
+            for (let i = 0; i < parent.children.length; i++) {
+                let child = parent.children[i]
+
+                // Check if this is a KeyBtn
+                if (child.isKeyBtn) {
+                    // Map point to child coordinates
+                    let localPt = child.mapFromItem(masterMouse, px, py)
+                    if (localPt.x >= 0 && localPt.x < child.width &&
+                        localPt.y >= 0 && localPt.y < child.height) {
+                        return child
+                    }
+                }
+
+                // Recursively search children
+                let found = findKeyRecursive(child, px, py)
+                if (found) return found
+            }
+            return null
         }
-        return (item && item.isKeyBtn) ? item : null
+
+        return findKeyRecursive(keysContainer, x, y)
     }
     
     component KeyBtn: Rectangle {
@@ -298,7 +319,13 @@ Window {
                     // Update visual trail (UI state)
                     let lp = keysContainer.mapFromItem(masterMouse, mouse.x, mouse.y)
                     root.currentPath.push({wx: mouse.x, wy: mouse.y, x: lp.x, y: lp.y})
-                    
+
+                    // Track key sequence for swipe (only single-letter keys)
+                    if (key && key !== root.lastSwipeKey && key.code.length === 1) {
+                        root.swipeKeySequence.push(key.code)
+                        root.lastSwipeKey = key
+                    }
+
                     // Live feedback: if we moved significantly, show swipe UI state
                     if (!root.isSwiping) {
                          if (_totalMove2() > (tapMaxMovePx * tapMaxMovePx)) {
@@ -318,21 +345,30 @@ Window {
             if (bridge.state === KeyboardBridge.Hidden) return
 
             _pathReset(mouse.x, mouse.y)
-            
+
             root.startPos = Qt.point(mouse.x, mouse.y)
             root.startTime = Date.now()
             root.isSwiping = false
             root.currentPath = []
             root.swipeCandidates = []
-            
+            root.swipeKeySequence = []  // Clear key sequence for new swipe
+            root.lastSwipeKey = null
+
             // Initial point for visual trail
             let lp = keysContainer.mapFromItem(masterMouse, mouse.x, mouse.y)
             root.currentPath = [{wx: mouse.x, wy: mouse.y, x: lp.x, y: lp.y}]
-            
+
             let key = root.getKeyAt(mouse.x, mouse.y)
+            console.log("onPressed: x=" + mouse.x + " y=" + mouse.y + " key=" + (key ? key.code : "null"))
             root.activeKey = key
             if (root.activeKey) root.activeKey.isPressed = true
-            
+
+            // Add initial key to sequence
+            if (key && key.code.length === 1) {
+                root.swipeKeySequence.push(key.code)
+                root.lastSwipeKey = key
+            }
+
             fadeTimer.stop()
             trailCanvas.requestPaint()
         }
@@ -350,9 +386,11 @@ Window {
                      var lp = keysContainer.mapFromItem(masterMouse, p[0], p[1])
                      enginePath.push({x: lp.x, y: lp.y})
                  }
-                 bridge.sendSwipePath(enginePath)
+                 console.log("Swipe keys from UI: " + root.swipeKeySequence.join(""))
+                 bridge.sendSwipeWithKeys(enginePath, root.swipeKeySequence)
                  fadeTimer.start()
             } else if (decision === "tap") {
+                 console.log("TAP: activeKey=" + (root.activeKey ? root.activeKey.code : "null"))
                  if (root.activeKey) {
                     console.log("Intent: Key Tap code=" + root.activeKey.code)
                      if (root.activeKey.code === "shift") {
@@ -362,6 +400,9 @@ Window {
                     } else {
                         root.sendKey(root.activeKey.code)
                     }
+                } else {
+                    console.log("TAP FAILED: activeKey is null at release")
+                }
             } else {
                 console.log("Gesture rejected")
             }

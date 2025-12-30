@@ -356,6 +356,37 @@ public slots:
              << "layout=qwerty points=" << path.size();
   }
 
+  Q_INVOKABLE void sendSwipeWithKeys(const QVariantList &path, const QVariantList &keys) {
+    promoteIfPassive("intent_swipe");
+
+    if (socket_->state() != QLocalSocket::ConnectedState)
+      return;
+
+    // Build keys JSON array
+    QString keysJson = "[";
+    for (int i = 0; i < keys.size(); ++i) {
+      keysJson += QString("\"%1\"").arg(keys[i].toString());
+      if (i < keys.size() - 1)
+        keysJson += ",";
+    }
+    keysJson += "]";
+
+    // Build points JSON (minimal, since we have keys)
+    QString pointsJson = "[]";
+
+    lastSwipeSeqSent_ = swipeSeq_++;
+    QString msg = QString("{\"type\":\"swipe_path\",\"seq\":%1,\"layout\":\""
+                          "qwerty\",\"ui_keys\":%2,\"points\":%3}\n")
+                      .arg(lastSwipeSeqSent_)
+                      .arg(keysJson)
+                      .arg(pointsJson);
+    socket_->write(msg.toUtf8());
+    socket_->flush();
+    lastSwipeSentTimer_.restart();
+    qDebug() << "Sent swipe_path seq=" << lastSwipeSeqSent_
+             << "ui_keys=" << keys.size();
+  }
+
 private slots:
   void tryConnect() {
     // Only connect if in unconnected state
