@@ -5,9 +5,9 @@ import MagicKeyboard 1.0
 
 Window {
     id: root
-    width: 800; height: 320 // Slightly taller for candidate bar
+    width: 580; height: 200 // Compact keyboard with numpad
     // Visibility is controlled by main.cpp -> bridge.state
-    
+
     // Passive Mode: Translucent when just focused, Opaque when active
     opacity: bridge.state === KeyboardBridge.Passive ? 0.8 : 1.0
     
@@ -163,7 +163,10 @@ Window {
             return null
         }
 
-        return findKeyRecursive(keysContainer, x, y)
+        // Search both main keyboard and numpad
+        let key = findKeyRecursive(keysContainer, x, y)
+        if (key) return key
+        return findKeyRecursive(numpadContainer, x, y)
     }
     
     component KeyBtn: Rectangle {
@@ -171,24 +174,24 @@ Window {
         property string label: ""
         property string code: label.toLowerCase()
         property string action: ""  // New property for shortcuts
-        property real kw: 60
+        property real kw: 32
         property bool special: false
         property bool isKeyBtn: true
         property bool isPressed: false
         property bool isHovered: false
-        
-        width: kw; height: 50; radius: 8
+
+        width: kw; height: 28; radius: 4
         color: isPressed ? "#4a4a8a" : (isHovered ? "#3a3a5a" : "#2a2a4a")
         border.color: isHovered ? "#88c0d0" : "#4a4a6a"
         border.width: isHovered ? 2 : 1
-        
+
         Text {
             anchors.centerIn: parent
             text: root.shiftActive && !parent.special && parent.label.length === 1
-                  ? parent.label.toUpperCase() 
+                  ? parent.label.toUpperCase()
                   : parent.label
             color: (parent.special || parent.action !== "") ? "#88c0d0" : "#eceff4"
-            font.pixelSize: (parent.special || parent.action !== "") ? 14 : 18
+            font.pixelSize: (parent.special || parent.action !== "") ? 9 : 12
             font.family: "sans-serif"
         }
     }
@@ -243,12 +246,12 @@ Window {
         // Intent Router: Input guarded by early returns in handlers
  
 
-        // --- Gesture thresholds (Steam Deck friendly, minimal tuning knobs)
-        property real tapMaxMovePx: 12      // <= this: treat as tap candidate
+        // --- Gesture thresholds (adjusted for compact keyboard)
+        property real tapMaxMovePx: 8       // <= this: treat as tap candidate
         property int  tapMaxMs: 220         // <= this: tap candidate
-        property real swipeMinMovePx: 18    // >= this: swipe candidate
-        property int  swipeMinPoints: 4     // >= this: swipe candidate
-        property real sampleMinDistPx: 3    // ignore micro-jitter points
+        property real swipeMinMovePx: 12    // >= this: swipe candidate
+        property int  swipeMinPoints: 3     // >= this: swipe candidate
+        property real sampleMinDistPx: 2    // ignore micro-jitter points
 
         property double _pressMs: 0
         property var _path: []
@@ -428,141 +431,179 @@ Window {
         }
     }
     
-    ColumnLayout {
+    RowLayout {
         id: mainLayout
         anchors.fill: parent
-        anchors.margins: 10
-        spacing: 6
-        
-        // Candidate placeholder
-        Rectangle {
-            id: candidateBar
-            Layout.fillWidth: true
-            height: 40
-            color: "#0f0f1a"
-            radius: 6
-            
-            Text {
-                anchors.centerIn: parent
-                visible: root.isSwiping || (root.swipeCandidates.length === 0 && root.debugKeys.length === 0)
-                text: root.isSwiping ? "Swiping..." : "Candidates (v0.2)"
-                color: root.isSwiping ? "#00d2ff" : "#555"
-                font.pixelSize: 14
-            }
+        anchors.margins: 4
+        spacing: 4
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 4
-                spacing: 8
-                visible: !root.isSwiping && (root.swipeCandidates.length > 0 || root.debugKeys.length > 0)
-                
-                Repeater {
-                    model: root.swipeCandidates.length > 0 ? root.swipeCandidates : root.debugKeys
-                    Rectangle {
-                        Layout.fillHeight: true
-                        Layout.preferredWidth: root.swipeCandidates.length > 0 ? 80 : 40
-                        color: root.swipeCandidates.length > 0 
-                               ? (candidateMa.pressed ? "#4a4a8a" : "#2a2a4a")
-                               : "#1a1a2e"
-                        radius: 4
-                        border.color: root.swipeCandidates.length > 0 ? "#3a3a5a" : "#2a2a4a"
-                        border.width: 1
-                        
-                        Text {
-                            anchors.centerIn: parent
-                            text: modelData
-                            color: root.swipeCandidates.length > 0 ? "#eceff4" : "#88c0d0"
-                            font.pixelSize: 14
-                        }
-                        
-                        MouseArea {
-                            id: candidateMa
-                            anchors.fill: parent
-                            enabled: root.swipeCandidates.length > 0
-                            onClicked: {
-                                bridge.commitCandidate(modelData)
-                                root.swipeCandidates = []
-                                root.debugKeys = []
+        // Left side: Main keyboard
+        ColumnLayout {
+            Layout.fillHeight: true
+            spacing: 3
+
+            // Candidate placeholder
+            Rectangle {
+                id: candidateBar
+                Layout.fillWidth: true
+                height: 22
+                color: "#0f0f1a"
+                radius: 3
+
+                Text {
+                    anchors.centerIn: parent
+                    visible: root.isSwiping || (root.swipeCandidates.length === 0 && root.debugKeys.length === 0)
+                    text: root.isSwiping ? "Swiping..." : ""
+                    color: root.isSwiping ? "#00d2ff" : "#555"
+                    font.pixelSize: 10
+                }
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 2
+                    spacing: 4
+                    visible: !root.isSwiping && (root.swipeCandidates.length > 0 || root.debugKeys.length > 0)
+
+                    Repeater {
+                        model: root.swipeCandidates.length > 0 ? root.swipeCandidates : root.debugKeys
+                        Rectangle {
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: root.swipeCandidates.length > 0 ? 50 : 24
+                            color: root.swipeCandidates.length > 0
+                                   ? (candidateMa.pressed ? "#4a4a8a" : "#2a2a4a")
+                                   : "#1a1a2e"
+                            radius: 3
+                            border.color: root.swipeCandidates.length > 0 ? "#3a3a5a" : "#2a2a4a"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData
+                                color: root.swipeCandidates.length > 0 ? "#eceff4" : "#88c0d0"
+                                font.pixelSize: 9
+                            }
+
+                            MouseArea {
+                                id: candidateMa
+                                anchors.fill: parent
+                                enabled: root.swipeCandidates.length > 0
+                                onClicked: {
+                                    bridge.commitCandidate(modelData)
+                                    root.swipeCandidates = []
+                                    root.debugKeys = []
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-        
-        ColumnLayout {
-            id: keysContainer
-            Layout.fillWidth: true
-            spacing: 6
-            
-            // Row 1
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 6
-                Repeater { model: root.row1; KeyBtn { label: modelData } }
-                KeyBtn { 
-                    label: "⌫"; code: "backspace"; kw: 80; special: true
-                    
-                    // Independent MouseArea for press-and-hold repeat
-                    MouseArea {
-                        anchors.fill: parent
-                        onPressed: {
-                            parent.isPressed = true
-                            bridge.backspaceHoldBegin()
+
+            ColumnLayout {
+                id: keysContainer
+                Layout.fillWidth: true
+                spacing: 3
+
+                // Row 1
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: 3
+                    Repeater { model: root.row1; KeyBtn { label: modelData } }
+                    KeyBtn {
+                        label: "⌫"; code: "backspace"; kw: 42; special: true
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onPressed: {
+                                parent.isPressed = true
+                                bridge.backspaceHoldBegin()
+                            }
+                            onReleased: {
+                                parent.isPressed = false
+                                bridge.backspaceHoldEnd()
+                            }
+                            onCanceled: {
+                                parent.isPressed = false
+                                bridge.backspaceHoldEnd()
+                            }
+                            propagateComposedEvents: false
                         }
-                        onReleased: {
-                            parent.isPressed = false
-                            bridge.backspaceHoldEnd()
-                        }
-                        onCanceled: {
-                            parent.isPressed = false
-                            bridge.backspaceHoldEnd()
-                        }
-                        // Stop propagation so masterMouse doesn't trigger "tap" logic
-                        propagateComposedEvents: false
                     }
                 }
-            }
-            
-            // Row 2
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 6
-                Item { width: 15 }
-                Repeater { model: root.row2; KeyBtn { label: modelData } }
-                KeyBtn { label: "↵"; action: "enter"; kw: 80; special: true }
-            }
-            
-            // Row 3
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 6
-                
-                KeyBtn { 
-                    label: "⇧"; code: "shift"; kw: 80; special: true 
-                    isPressed: root.shiftActive
-                }
-                
-                Repeater { model: root.row3; KeyBtn { label: modelData } }
-                KeyBtn { label: ","; code: "," }
-                KeyBtn { label: "."; code: "." }
-            }
-            
-            // Row 4: Space bar + Shortcuts
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 6
-                
-                KeyBtn { label: "Copy"; action: "copy"; kw: 80 }
-                KeyBtn { label: "Paste"; action: "paste"; kw: 80 }
-                
-                KeyBtn { label: "←"; action: "left"; kw: 60 }
-                KeyBtn { label: "→"; action: "right"; kw: 60 }
 
-                KeyBtn { label: "space"; code: "space"; kw: 200; special: true }
-                
-                KeyBtn { label: "Cut"; action: "cut"; kw: 80 }
-                KeyBtn { label: "Select All"; action: "selectall"; kw: 100 }
+                // Row 2
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: 3
+                    Item { width: 8 }
+                    Repeater { model: root.row2; KeyBtn { label: modelData } }
+                    KeyBtn { label: "↵"; action: "enter"; kw: 50; special: true }
+                }
+
+                // Row 3
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: 3
+
+                    KeyBtn {
+                        label: "⇧"; code: "shift"; kw: 42; special: true
+                        isPressed: root.shiftActive
+                    }
+
+                    Repeater { model: root.row3; KeyBtn { label: modelData } }
+                    KeyBtn { label: ","; code: "," }
+                    KeyBtn { label: "."; code: "." }
+                }
+
+                // Row 4: Space bar + minimal shortcuts
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: 3
+
+                    KeyBtn { label: "←"; action: "left"; kw: 32 }
+                    KeyBtn { label: "→"; action: "right"; kw: 32 }
+                    KeyBtn { label: "space"; code: "space"; kw: 180; special: true }
+                    KeyBtn { label: "Cp"; action: "copy"; kw: 32 }
+                    KeyBtn { label: "Ps"; action: "paste"; kw: 32 }
+                }
+            }
+        }
+
+        // Separator
+        Rectangle {
+            Layout.fillHeight: true
+            width: 1
+            color: "#3a3a5a"
+        }
+
+        // Right side: Numpad
+        ColumnLayout {
+            id: numpadContainer
+            Layout.fillHeight: true
+            spacing: 3
+
+            // Numpad rows
+            RowLayout {
+                spacing: 3
+                KeyBtn { label: "7"; code: "7" }
+                KeyBtn { label: "8"; code: "8" }
+                KeyBtn { label: "9"; code: "9" }
+            }
+            RowLayout {
+                spacing: 3
+                KeyBtn { label: "4"; code: "4" }
+                KeyBtn { label: "5"; code: "5" }
+                KeyBtn { label: "6"; code: "6" }
+            }
+            RowLayout {
+                spacing: 3
+                KeyBtn { label: "1"; code: "1" }
+                KeyBtn { label: "2"; code: "2" }
+                KeyBtn { label: "3"; code: "3" }
+            }
+            RowLayout {
+                spacing: 3
+                KeyBtn { label: "0"; code: "0"; kw: 67 }
+                KeyBtn { label: "-"; code: "-" }
             }
         }
     }
@@ -572,20 +613,20 @@ Window {
         id: toggleButton
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.margins: 12
-        width: 50; height: 26
-        radius: 4
+        anchors.margins: 6
+        width: 32; height: 18
+        radius: 3
         color: toggleMouse.pressed ? "#444" : "#ff4757"
         border.color: "white"
         border.width: 1
         opacity: 0.9
-        z: 999 
+        z: 999
 
         Text {
             anchors.centerIn: parent
-            text: bridge.state === KeyboardBridge.Hidden ? "Show" : "Hide"
+            text: "X"
             color: "white"
-            font.pixelSize: 11
+            font.pixelSize: 10
             font.bold: true
         }
 
