@@ -54,26 +54,46 @@ sudo pacman -S fcitx5 fcitx5-qt qt6-base qt6-declarative cmake ninja
 
 ## Building & Installing
 
-### Building
+### Steam Deck - Quick Install (Recommended)
+
+For Steam Deck users, use the automated installation script:
+
+```bash
+./install-steamdeck.sh
+```
+
+This script will:
+- ✅ Remove any old installation
+- ✅ Build and install the new version
+- ✅ Set up environment variables
+- ✅ Configure systemd service
+- ✅ Set up Flatpak apps
+
+After running the script:
+1. Add "Magic Keyboard" in System Settings → Input Method
+2. Log out and log back in (or reboot)
+3. Run `magic-keyboard-verify` to confirm installation
+
+### Manual Building
 ```bash
 # Configure
-cmake -S . -B build -G Ninja -DCMAKE_INSTALL_PREFIX=/usr
+cmake -S . -B build -G Ninja -DCMAKE_INSTALL_PREFIX=/usr/local
 
 # Build
 cmake --build build
 ```
 
-### Installing
+### Manual Installing
 ```bash
 # Install to system paths
 sudo cmake --install build
 ```
 
 This will automatically install:
-- **Engine**: `/usr/lib/x86_64-linux-gnu/fcitx5/libmagickeyboard.so`
-- **Configs**: `/usr/share/fcitx5/{addon,inputmethod}/magickeyboard.conf`
-- **Binaries**: `/usr/bin/magickeyboard-{ui,ctl}`
-- **Launcher**: `/usr/share/applications/magickeyboard.desktop`
+- **Engine**: `/usr/local/lib/fcitx5/libmagickeyboard.so`
+- **Configs**: `/usr/local/share/fcitx5/{addon,inputmethod}/magickeyboard.conf`
+- **Binaries**: `/usr/local/bin/magickeyboard-{ui,ctl}`
+- **Launcher**: `/usr/local/share/applications/magickeyboard*.desktop`
 
 ## Testing (Development)
 
