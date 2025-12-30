@@ -7,7 +7,7 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/magickeyboard-ui
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/magickeyboard-ui
 Restart=on-failure
 RestartSec=2
 

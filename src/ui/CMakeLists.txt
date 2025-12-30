@@ -46,8 +46,4 @@ install(TARGETS magickeyboard-ui magickeyboardctl
 )
 
 # Install KDE Plasma launcher
-if(MAGICKEYBOARD_INSTALL_DESKTOP)
-    install(FILES ../../packaging/plasma/magickeyboard.desktop
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
-    )
-endif()
+

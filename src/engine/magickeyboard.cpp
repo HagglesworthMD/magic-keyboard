@@ -233,6 +233,7 @@ void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
   switch (visibilityState_) {
   case VisibilityState::Hidden:
     currentIC_ = ic;
+    lastFocusedIc_ = ic;
     pendingIC_ = ic;
     visibilityState_ = VisibilityState::PendingShow;
     scheduleDebounce(VisibilityState::Visible, DEBOUNCE_SHOW_MS);
@@ -241,6 +242,7 @@ void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
   case VisibilityState::PendingShow:
     // Another FocusIn - update target IC, reset timer
     currentIC_ = ic;
+    lastFocusedIc_ = ic;
     pendingIC_ = ic;
     scheduleDebounce(VisibilityState::Visible, DEBOUNCE_SHOW_MS);
     break;
@@ -250,6 +252,7 @@ void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
     MKLOG(Info) << "FocusIn during PendingHide - canceling hide";
     cancelDebounce();
     currentIC_ = ic;
+    lastFocusedIc_ = ic;
     visibilityState_ = VisibilityState::Visible;
     // Already visible, no need to send show again
     break;
@@ -257,6 +260,7 @@ void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
   case VisibilityState::Visible:
     // Already visible, just update IC
     currentIC_ = ic;
+    lastFocusedIc_ = ic;
     break;
   }
 }
@@ -417,10 +421,22 @@ bool MagicKeyboardEngine::isTerminal(const std::string &program) {
   return false;
 }
 
+fcitx::InputContext *MagicKeyboardEngine::pickTargetInputContext() {
+  if (currentIC_ && currentIC_->hasFocus()) {
+    return currentIC_;
+  }
+  if (lastFocusedIc_) {
+    return lastFocusedIc_;
+  }
+  return instance_ ? instance_->inputContextManager().lastFocusedInputContext()
+                   : nullptr;
+}
+
 void MagicKeyboardEngine::handleShortcutAction(const std::string &action) {
-  auto *ic = instance_->inputContextManager().lastFocusedInputContext();
-  if (!ic || !ic->hasFocus()) {
-    MKLOG(Warn) << "ShortcutAction '" << action << "' but no active IC";
+  fcitx::InputContext *ic = pickTargetInputContext();
+
+  if (!ic) {
+    MKLOG(Warn) << "ShortcutAction '" << action << "' but no IC found";
     return;
   }
 
@@ -438,6 +454,12 @@ void MagicKeyboardEngine::handleShortcutAction(const std::string &action) {
       MKLOG(Info) << "Blocked " << action << " in password field";
       return;
     }
+  }
+
+  // Force simulation if context claims no focus but is the last focused one
+  if (!ic->hasFocus()) {
+    MKLOG(Info) << "Shortcut: forcing " << action
+                << " on non-focused IC program=" << program;
   }
 
   // Map action to key symbol
@@ -459,18 +481,22 @@ void MagicKeyboardEngine::handleShortcutAction(const std::string &action) {
     return;
   }
 
-  // Build key states
-  fcitx::KeyStates states = fcitx::KeyState::Ctrl;
+  // Explicitly simulate physical key sequence: Ctrl down -> Key click -> Ctrl
+  // up This is more robust than fcitx::KeyState::Ctrl which some apps ignore
+  ic->forwardKey(fcitx::Key(FcitxKey_Control_L), false); // Ctrl Press
+
   if (useShift) {
-    states |= fcitx::KeyState::Shift;
+    ic->forwardKey(fcitx::Key(FcitxKey_Shift_L), false); // Shift Press
   }
 
-  // Create key with modifiers
-  fcitx::Key key(sym, states);
+  ic->forwardKey(fcitx::Key(sym), false); // Key Press
+  ic->forwardKey(fcitx::Key(sym), true);  // Key Release
 
-  // Forward key-down then key-up
-  ic->forwardKey(key, false);
-  ic->forwardKey(key, true);
+  if (useShift) {
+    ic->forwardKey(fcitx::Key(FcitxKey_Shift_L), true); // Shift Release
+  }
+
+  ic->forwardKey(fcitx::Key(FcitxKey_Control_L), true); // Ctrl Release
 
   MKLOG(Info) << "Shortcut: " << action << " -> "
               << (useShift ? "Ctrl+Shift+" : "Ctrl+")
@@ -479,21 +505,32 @@ void MagicKeyboardEngine::handleShortcutAction(const std::string &action) {
 }
 
 void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
-  if (!currentIC_) {
-    MKLOG(Warn) << "Key but no active IC";
+  // Use pickTargetInputContext to resolve focused or cached fallback
+  fcitx::InputContext *ic = pickTargetInputContext();
+
+  if (!ic) {
+    MKLOG(Warn) << "Key '" << key << "' but no IC found";
     return;
   }
 
-  MKLOG(Debug) << "Commit: " << key;
+  std::string program = ic->program();
+  // Force commit if context claims no focus but is the last focused one (common
+  // on Steam Deck)
+  if (!ic->hasFocus()) {
+    MKLOG(Info) << "Key: forcing '" << key
+                << "' on non-focused IC program=" << program;
+  }
+
+  MKLOG(Info) << "KeyCommit: '" << key << "' -> " << program;
 
   if (candidateMode_) {
     if (key == "space") {
       if (!currentCandidates_.empty()) {
-        currentIC_->commitString(currentCandidates_[0].word + " ");
+        ic->commitString(currentCandidates_[0].word + " ");
         MKLOG(Info) << "CommitTop word=" << currentCandidates_[0].word
                     << " space=1";
       } else {
-        currentIC_->commitString(" ");
+        ic->commitString(" ");
       }
       candidateMode_ = false;
       currentCandidates_.clear();
@@ -506,7 +543,7 @@ void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
       return;
     } else if (key == "enter") {
       if (!currentCandidates_.empty()) {
-        currentIC_->commitString(currentCandidates_[0].word);
+        ic->commitString(currentCandidates_[0].word);
         MKLOG(Info) << "CommitTop (Enter) word=" << currentCandidates_[0].word
                     << " space=0";
       }
@@ -517,7 +554,7 @@ void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
     } else {
       // Implicit commit for letters
       if (!currentCandidates_.empty()) {
-        currentIC_->commitString(currentCandidates_[0].word);
+        ic->commitString(currentCandidates_[0].word);
         MKLOG(Info) << "CommitTop (Implicit) word="
                     << currentCandidates_[0].word << " space=0";
       }
@@ -528,15 +565,32 @@ void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
   }
 
   if (key == "backspace") {
-    currentIC_->forwardKey(fcitx::Key(FcitxKey_BackSpace), false);
-    currentIC_->forwardKey(fcitx::Key(FcitxKey_BackSpace), true);
+    ic->forwardKey(fcitx::Key(FcitxKey_BackSpace), false);
+    ic->forwardKey(fcitx::Key(FcitxKey_BackSpace), true);
+    MKLOG(Debug) << "forwardKey: BackSpace";
   } else if (key == "enter") {
-    currentIC_->forwardKey(fcitx::Key(FcitxKey_Return), false);
-    currentIC_->forwardKey(fcitx::Key(FcitxKey_Return), true);
+    ic->forwardKey(fcitx::Key(FcitxKey_Return), false);
+    ic->forwardKey(fcitx::Key(FcitxKey_Return), true);
+    MKLOG(Debug) << "forwardKey: Return";
+  } else if (key == "left") {
+    ic->forwardKey(fcitx::Key(FcitxKey_Left), false);
+    ic->forwardKey(fcitx::Key(FcitxKey_Left), true);
+    MKLOG(Debug) << "forwardKey: Left";
+  } else if (key == "right") {
+    ic->forwardKey(fcitx::Key(FcitxKey_Right), false);
+    ic->forwardKey(fcitx::Key(FcitxKey_Right), true);
+    MKLOG(Debug) << "forwardKey: Right";
   } else if (key == "space") {
-    currentIC_->commitString(" ");
+    ic->forwardKey(fcitx::Key(FcitxKey_space), false);
+    ic->forwardKey(fcitx::Key(FcitxKey_space), true);
+    MKLOG(Debug) << "forwardKey: space";
+  } else if (key == "tab") {
+    ic->forwardKey(fcitx::Key(FcitxKey_Tab), false);
+    ic->forwardKey(fcitx::Key(FcitxKey_Tab), true);
+    MKLOG(Debug) << "forwardKey: Tab";
   } else {
-    currentIC_->commitString(key);
+    ic->commitString(key);
+    MKLOG(Debug) << "commitString: '" << key << "'";
   }
 }
 
@@ -805,13 +859,84 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
       pos += 10;
       auto end = line.find("\"", pos);
       if (end != std::string::npos) {
-        handleShortcutAction(line.substr(pos, end - pos));
+        std::string a = line.substr(pos, end - pos);
+        // Route typing-related actions to key handler for correct state logic
+        if (a == "backspace" || a == "enter" || a == "space" || a == "tab" ||
+            a == "left" || a == "right") {
+          handleKeyPress(a);
+        } else {
+          handleShortcutAction(a);
+        }
       }
+    }
+  } else if (line.find("\"type\":\"ui_intent\"") != std::string::npos) {
+    // Parse intent (accept "kind" or "intent" for compatibility)
+    auto getVal = [&](const std::string &field) -> std::string {
+      std::string patt = "\"" + field + "\":\"";
+      auto pos = line.find(patt);
+      if (pos == std::string::npos)
+        return "";
+      pos += patt.length();
+      auto end = line.find("\"", pos);
+      return (end != std::string::npos) ? line.substr(pos, end - pos) : "";
+    };
+
+    std::string kind = getVal("kind");
+    if (kind.empty())
+      kind = getVal("intent");
+
+    bool handled = false;
+    if (kind == "key") {
+      std::string k = getVal("key");
+      if (k.empty())
+        k = getVal("value");
+      if (!k.empty()) {
+        auto *lf =
+            instance_
+                ? instance_->inputContextManager().lastFocusedInputContext()
+                : nullptr;
+        MKLOG(Info) << "ui_intent key='" << k
+                    << "' currentIC=" << (currentIC_ ? "yes" : "no")
+                    << " lastFocusedIc=" << (lastFocusedIc_ ? "yes" : "no")
+                    << " fcitxLF=" << (lf ? "yes" : "no");
+        handleKeyPress(k);
+        handled = true;
+      }
+    } else if (kind == "action") {
+      std::string a = getVal("action");
+      if (a.empty())
+        a = getVal("value");
+      if (!a.empty()) {
+        // Route typing-related actions to key handler for correct state logic
+        if (a == "backspace" || a == "enter" || a == "space" || a == "tab" ||
+            a == "left" || a == "right") {
+          auto *lf =
+              instance_
+                  ? instance_->inputContextManager().lastFocusedInputContext()
+                  : nullptr;
+          MKLOG(Info) << "ui_intent action->key='" << a
+                      << "' currentIC=" << (currentIC_ ? "yes" : "no")
+                      << " lastFocusedIc=" << (lastFocusedIc_ ? "yes" : "no")
+                      << " fcitxLF=" << (lf ? "yes" : "no");
+          handleKeyPress(a);
+        } else {
+          handleShortcutAction(a);
+        }
+        handled = true;
+      }
+    }
+
+    // Relay unhandled intents (e.g. swipe) to UI; suppress handled ones
+    if (!handled) {
+      sendToUI(line + "\n");
+    }
+
+    if (clientFd >= 0) {
+      write(clientFd, "{\"ok\":true}\n", 11);
     }
   } else if (line.find("\"type\":\"ui_show\"") != std::string::npos ||
              line.find("\"type\":\"ui_hide\"") != std::string::npos ||
-             line.find("\"type\":\"ui_toggle\"") != std::string::npos ||
-             line.find("\"type\":\"ui_intent\"") != std::string::npos) {
+             line.find("\"type\":\"ui_toggle\"") != std::string::npos) {
     // Sender-side throttling for toggle (100ms)
     bool isToggle = line.find("\"type\":\"ui_toggle\"") != std::string::npos;
     bool shouldSend = true;
@@ -937,6 +1062,56 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
                       << " identified as role: " << role;
         }
       }
+    }
+  } else if (line.find("\"type\":\"commit_text\"") != std::string::npos) {
+    // Paste feature: commit arbitrary text from clipboard
+    auto pos = line.find("\"text\":\"");
+    if (pos != std::string::npos) {
+      pos += 8;
+      std::string text;
+      // Parse JSON string with escape sequence handling
+      for (size_t i = pos; i < line.size(); ++i) {
+        if (line[i] == '\\' && i + 1 < line.size()) {
+          char next = line[i + 1];
+          if (next == 'n') {
+            text += '\n';
+            ++i;
+          } else if (next == 'r') {
+            text += '\r';
+            ++i;
+          } else if (next == 't') {
+            text += '\t';
+            ++i;
+          } else if (next == '"') {
+            text += '"';
+            ++i;
+          } else if (next == '\\') {
+            text += '\\';
+            ++i;
+          } else {
+            text += line[i];
+          }
+        } else if (line[i] == '"') {
+          break;
+        } else {
+          text += line[i];
+        }
+      }
+
+      if (text.empty()) {
+        MKLOG(Warn) << "commit_text: empty text";
+      } else {
+        auto *ic = pickTargetInputContext();
+        if (ic) {
+          ic->commitString(text);
+          MKLOG(Info) << "commit_text: pasted len=" << text.size()
+                      << " program=" << ic->program();
+        } else {
+          MKLOG(Warn) << "commit_text: no IC found";
+        }
+      }
+    } else {
+      MKLOG(Warn) << "commit_text: missing text field";
     }
   }
 }
@@ -1077,6 +1252,10 @@ void MagicKeyboardEngine::stopSocketServer() {
 }
 
 void MagicKeyboardEngine::launchUI() {
+  if (uiPid_ > 0) {
+    MKLOG(Info) << "UI spawn suppressed (already have pid=" << uiPid_ << ")";
+    return;
+  }
   uiSpawnPending_ = true;
 
   pid_t pid = fork();

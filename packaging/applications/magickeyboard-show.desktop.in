@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Show Magic Keyboard
+Comment=Show the Magic Keyboard
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/magickeyboardctl show
+Icon=input-keyboard
+Categories=Utility;Accessibility;
+Terminal=false
+StartupNotify=false

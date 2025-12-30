@@ -91,3 +91,38 @@ message(STATUS "  Fcitx5 addon: src/engine")
 message(STATUS "  UI:           src/ui")
 message(STATUS "  Install prefix: ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "")
+
+# -----------------------------------------------------------------------------
+# Packaging and Integration
+# -----------------------------------------------------------------------------
+
+# Systemd Service
+# Systemd user units:
+# For user instances, systemd searches XDG data dirs (e.g. ~/.local/share/systemd/user)
+# and ~/.config/systemd/user. It does NOT scan ~/.local/lib/systemd/user by default.
+# So we install to share/systemd/user under the chosen prefix.
+set(SYSTEMD_USER_UNIT_DIR "${CMAKE_INSTALL_DATAROOTDIR}/systemd/user" CACHE PATH "Installation directory for systemd user units")
+configure_file(packaging/systemd/magickeyboard-ui.service.in magickeyboard-ui.service @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/magickeyboard-ui.service DESTINATION ${SYSTEMD_USER_UNIT_DIR})
+
+# Install fcitx5 user unit (optional helper for dev/test workflow)
+install(FILES packaging/systemd/fcitx5.service DESTINATION ${SYSTEMD_USER_UNIT_DIR})
+
+# Install fcitx5 launcher script (escapes namespace sandboxing on SteamOS)
+install(PROGRAMS packaging/scripts/fcitx5-launch.sh DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Desktop Entries
+if(MAGICKEYBOARD_INSTALL_DESKTOP)
+    configure_file(packaging/applications/magickeyboard.desktop.in magickeyboard.desktop @ONLY)
+    configure_file(packaging/applications/magickeyboard-show.desktop.in magickeyboard-show.desktop @ONLY)
+    configure_file(packaging/applications/magickeyboard-hide.desktop.in magickeyboard-hide.desktop @ONLY)
+    configure_file(packaging/applications/magickeyboard-toggle.desktop.in magickeyboard-toggle.desktop @ONLY)
+    
+    install(FILES 
+        ${CMAKE_CURRENT_BINARY_DIR}/magickeyboard.desktop
+        ${CMAKE_CURRENT_BINARY_DIR}/magickeyboard-show.desktop
+        ${CMAKE_CURRENT_BINARY_DIR}/magickeyboard-hide.desktop
+        ${CMAKE_CURRENT_BINARY_DIR}/magickeyboard-toggle.desktop
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
+    )
+endif()

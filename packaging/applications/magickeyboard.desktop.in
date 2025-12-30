@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Magic Keyboard
+Comment=On-screen keyboard for SteamOS Desktop Mode
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/magickeyboardctl show
+Icon=input-keyboard
+Categories=Utility;Accessibility;
+Terminal=false
+StartupNotify=false
+Keywords=keyboard;osk;input;
+GenericName=On-Screen Keyboard
+Actions=Toggle;Hide;
+
+[Desktop Action Toggle]
+Name=Toggle Magic Keyboard
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/magickeyboardctl toggle
+
+[Desktop Action Hide]
+Name=Hide Magic Keyboard
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/magickeyboardctl hide

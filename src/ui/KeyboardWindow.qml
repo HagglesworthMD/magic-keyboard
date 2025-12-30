@@ -222,6 +222,67 @@ Window {
         // Intent Router: Input guarded by early returns in handlers
  
 
+        // --- Gesture thresholds (Steam Deck friendly, minimal tuning knobs)
+        property real tapMaxMovePx: 12      // <= this: treat as tap candidate
+        property int  tapMaxMs: 220         // <= this: tap candidate
+        property real swipeMinMovePx: 18    // >= this: swipe candidate
+        property int  swipeMinPoints: 4     // >= this: swipe candidate
+        property real sampleMinDistPx: 3    // ignore micro-jitter points
+
+        property double _pressMs: 0
+        property var _path: []
+        property real _lastX: 0
+        property real _lastY: 0
+
+        function _nowMs() { return Date.now(); }
+
+        function _dist2(ax, ay, bx, by) {
+            var dx = ax - bx; var dy = ay - by;
+            return dx*dx + dy*dy;
+        }
+
+        function _pathReset(x, y) {
+            _pressMs = _nowMs();
+            _path = [];
+            _lastX = x; _lastY = y;
+            _path.push([x, y]);
+        }
+
+        function _pathAdd(x, y) {
+            // Dedup jitter / too-close samples
+            if (_dist2(x, y, _lastX, _lastY) < (sampleMinDistPx * sampleMinDistPx))
+                return false;
+            _lastX = x; _lastY = y;
+            _path.push([x, y]);
+            return true;
+        }
+
+        function _totalMove2() {
+            if (_path.length < 2) return 0;
+            var a = _path[0];
+            var b = _path[_path.length - 1];
+            return _dist2(a[0], a[1], b[0], b[1]);
+        }
+
+        function _commitGesture() {
+            var dt = _nowMs() - _pressMs;
+            var move2 = _totalMove2();
+
+            var isTap = (dt <= tapMaxMs) && (move2 <= (tapMaxMovePx * tapMaxMovePx));
+            var isSwipe = (move2 >= (swipeMinMovePx * swipeMinMovePx)) && (_path.length >= swipeMinPoints);
+
+            if (isTap) {
+                return "tap";
+            }
+
+            if (isSwipe) {
+                return "swipe";
+            }
+
+            // Neither: reject quietly (or minimal log)
+            return "reject";
+        }
+
         onPositionChanged: (mouse) => {
             if (bridge.state === KeyboardBridge.Hidden) return
             
@@ -233,36 +294,22 @@ Window {
             }
 
             if (pressed) {
-                let dx = mouse.x - root.startPos.x
-                let dy = mouse.y - root.startPos.y
-                let dist = Math.sqrt(dx*dx + dy*dy)
-                let dt = Date.now() - root.startTime
-
-                if (!root.isSwiping) {
-                    if (dist > root.deadzone && dt > root.timeThreshold) {
-                        root.isSwiping = true
-                        console.log("Intent: Swipe started") // Intent Log
-                        if (root.activeKey) root.activeKey.isPressed = false
-                        // Store both window (wx, wy) and layout (x, y) coordinates
-                        // Fix: root is Window, use keysContainer.mapFromItem
-                        let lp = keysContainer.mapFromItem(masterMouse, mouse.x, mouse.y)
-                        root.currentPath = [{wx: mouse.x, wy: mouse.y, x: lp.x, y: lp.y}]
-                        trailCanvas.requestPaint()
-                    }
-                } else {
-                    // Smoothing (EMA) on window space for visual consistency
-                    let last = root.currentPath[root.currentPath.length - 1]
-                    if (!last) return;
-                    let nwx = root.smoothingAlpha * mouse.x + (1 - root.smoothingAlpha) * last.wx
-                    let nwy = root.smoothingAlpha * mouse.y + (1 - root.smoothingAlpha) * last.wy
+                if (_pathAdd(mouse.x, mouse.y)) {
+                    // Update visual trail (UI state)
+                    let lp = keysContainer.mapFromItem(masterMouse, mouse.x, mouse.y)
+                    root.currentPath.push({wx: mouse.x, wy: mouse.y, x: lp.x, y: lp.y})
                     
-                    let rdist = Math.sqrt(Math.pow(nwx - last.wx, 2) + Math.pow(nwy - last.wy, 2))
-                    
-                    if (rdist >= root.resampleDist) {
-                        let nlp = keysContainer.mapFromItem(masterMouse, nwx, nwy)
-                        root.currentPath.push({wx: nwx, wy: nwy, x: nlp.x, y: nlp.y})
-                        trailCanvas.requestPaint()
+                    // Live feedback: if we moved significantly, show swipe UI state
+                    if (!root.isSwiping) {
+                         if (_totalMove2() > (tapMaxMovePx * tapMaxMovePx)) {
+                             root.isSwiping = true
+                             if (root.activeKey) {
+                                 root.activeKey.isPressed = false
+                                 root.activeKey = null
+                             }
+                         }
                     }
+                    trailCanvas.requestPaint()
                 }
             }
         }
@@ -270,11 +317,17 @@ Window {
         onPressed: (mouse) => {
             if (bridge.state === KeyboardBridge.Hidden) return
 
+            _pathReset(mouse.x, mouse.y)
+            
             root.startPos = Qt.point(mouse.x, mouse.y)
             root.startTime = Date.now()
             root.isSwiping = false
             root.currentPath = []
             root.swipeCandidates = []
+            
+            // Initial point for visual trail
+            let lp = keysContainer.mapFromItem(masterMouse, mouse.x, mouse.y)
+            root.currentPath = [{wx: mouse.x, wy: mouse.y, x: lp.x, y: lp.y}]
             
             let key = root.getKeyAt(mouse.x, mouse.y)
             root.activeKey = key
@@ -287,33 +340,50 @@ Window {
         onReleased: (mouse) => {
             if (bridge.state === KeyboardBridge.Hidden) return
 
-            if (root.isSwiping) {
-                let duration = Date.now() - root.startTime
-                console.log("Intent: Swipe Committed points=" + root.currentPath.length)
-                
-                // Construct points for engine (layout space)
-                let enginePath = []
-                for (let p of root.currentPath) enginePath.push({x: p.x, y: p.y})
-                bridge.sendSwipePath(enginePath)
-                
-                fadeTimer.start()
-            } else {
-                if (root.activeKey) {
-                    root.activeKey.isPressed = false
-                    console.log("Intent: Key Tap code=" + root.activeKey.code)
+            var decision = _commitGesture()
+            console.log("Gesture decision: " + decision + " pts=" + _path.length)
 
-                    if (root.activeKey.code === "shift") {
+            if (decision === "swipe") {
+                 var enginePath = []
+                 for (var i = 0; i < _path.length; i++) {
+                     var p = _path[i]
+                     var lp = keysContainer.mapFromItem(masterMouse, p[0], p[1])
+                     enginePath.push({x: lp.x, y: lp.y})
+                 }
+                 bridge.sendSwipePath(enginePath)
+                 fadeTimer.start()
+            } else if (decision === "tap") {
+                 if (root.activeKey) {
+                    console.log("Intent: Key Tap code=" + root.activeKey.code)
+                     if (root.activeKey.code === "shift") {
                         root.shiftActive = !root.shiftActive
-                        // Shift is UI-local modifier; does not promote state
                     } else if (root.activeKey.action !== "") {
                         bridge.sendAction(root.activeKey.action)
                     } else {
                         root.sendKey(root.activeKey.code)
                     }
-                }
+            } else {
+                console.log("Gesture rejected")
             }
+            
+            if (root.activeKey) root.activeKey.isPressed = false
             root.activeKey = null
             root.isSwiping = false
+            // Clear hover state on release to avoid stuck hover
+            if (root.hoverKey) {
+                root.hoverKey.isHovered = false
+                root.hoverKey = null
+            }
+        }
+        
+        onCanceled: {
+            if (root.activeKey) root.activeKey.isPressed = false
+            root.activeKey = null
+            root.isSwiping = false
+            if (root.hoverKey) {
+                root.hoverKey.isHovered = false
+                root.hoverKey = null
+            }
         }
     }
     
@@ -389,7 +459,28 @@ Window {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 6
                 Repeater { model: root.row1; KeyBtn { label: modelData } }
-                KeyBtn { label: "⌫"; code: "backspace"; kw: 80; special: true }
+                KeyBtn { 
+                    label: "⌫"; code: "backspace"; kw: 80; special: true
+                    
+                    // Independent MouseArea for press-and-hold repeat
+                    MouseArea {
+                        anchors.fill: parent
+                        onPressed: {
+                            parent.isPressed = true
+                            bridge.backspaceHoldBegin()
+                        }
+                        onReleased: {
+                            parent.isPressed = false
+                            bridge.backspaceHoldEnd()
+                        }
+                        onCanceled: {
+                            parent.isPressed = false
+                            bridge.backspaceHoldEnd()
+                        }
+                        // Stop propagation so masterMouse doesn't trigger "tap" logic
+                        propagateComposedEvents: false
+                    }
+                }
             }
             
             // Row 2
@@ -398,7 +489,7 @@ Window {
                 spacing: 6
                 Item { width: 15 }
                 Repeater { model: root.row2; KeyBtn { label: modelData } }
-                KeyBtn { label: "↵"; code: "enter"; kw: 80; special: true }
+                KeyBtn { label: "↵"; action: "enter"; kw: 80; special: true }
             }
             
             // Row 3
@@ -424,7 +515,10 @@ Window {
                 KeyBtn { label: "Copy"; action: "copy"; kw: 80 }
                 KeyBtn { label: "Paste"; action: "paste"; kw: 80 }
                 
-                KeyBtn { label: "space"; code: "space"; kw: 300; special: true }
+                KeyBtn { label: "←"; action: "left"; kw: 60 }
+                KeyBtn { label: "→"; action: "right"; kw: 60 }
+
+                KeyBtn { label: "space"; code: "space"; kw: 200; special: true }
                 
                 KeyBtn { label: "Cut"; action: "cut"; kw: 80 }
                 KeyBtn { label: "Select All"; action: "selectall"; kw: 100 }

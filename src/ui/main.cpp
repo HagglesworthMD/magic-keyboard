@@ -3,6 +3,7 @@
  * Non-focusable Qt6/QML keyboard with socket IPC
  */
 
+#include <QClipboard>
 #include <QDebug>
 #include <QGuiApplication>
 #include <QJsonArray>
@@ -18,6 +19,7 @@
 
 #include "protocol.h"
 #include <QElapsedTimer>
+#include <QTimer>
 #include <algorithm>
 #include <cmath>
 
@@ -40,6 +42,18 @@ public:
     lastToggleTimer_.start();
     toggleLogTimer_.start();
     swipeSeq_ = 1;
+
+    // Backspace repeat
+    backspaceRepeatTimer_.setSingleShot(false);
+    backspaceRepeatTimer_.setInterval(
+        45); // fast enough to feel native; low overhead
+    connect(&backspaceRepeatTimer_, &QTimer::timeout, this, [this]() {
+      if (!backspaceHeld_) {
+        backspaceRepeatTimer_.stop();
+        return;
+      }
+      sendAction(QStringLiteral("backspace"));
+    });
 
     connect(socket_, &QLocalSocket::connected, this, [this]() {
       qDebug() << "Connected to engine";
@@ -142,6 +156,28 @@ public slots:
     }
   }
 
+  Q_INVOKABLE void backspaceHoldBegin() {
+    if (backspaceHeld_)
+      return;
+    backspaceHeld_ = true;
+    backspaceHoldElapsed_.restart();
+
+    // Immediate delete on press
+    sendAction(QStringLiteral("backspace"));
+
+    // Start repeating after an initial delay (phone-like)
+    QTimer::singleShot(250, this, [this]() {
+      if (!backspaceHeld_)
+        return;
+      backspaceRepeatTimer_.start();
+    });
+  }
+
+  Q_INVOKABLE void backspaceHoldEnd() {
+    backspaceHeld_ = false;
+    backspaceRepeatTimer_.stop();
+  }
+
   void sendAction(const QString &action) {
     promoteIfPassive("intent_action");
 
@@ -152,6 +188,44 @@ public slots:
     if (socket_->write(msg.toUtf8()) > 0) {
       socket_->flush();
       qDebug() << "Sent action type=" << action;
+    }
+  }
+
+  // Paste from clipboard: reads clipboard text and sends commit_text to engine
+  // This bypasses system Ctrl+V which is unreliable when fcitx5 is running
+  void pasteFromClipboard() {
+    promoteIfPassive("intent_paste");
+
+    QClipboard *clipboard = QGuiApplication::clipboard();
+    if (!clipboard) {
+      qWarning() << "Paste: no clipboard available";
+      return;
+    }
+
+    QString text = clipboard->text();
+    if (text.isEmpty()) {
+      qDebug() << "Paste: clipboard empty";
+      return;
+    }
+
+    if (socket_->state() != QLocalSocket::ConnectedState) {
+      qWarning() << "Paste: not connected to engine";
+      return;
+    }
+
+    // Escape text for JSON: handle quotes, backslashes, newlines
+    QString escaped = text;
+    escaped.replace("\\", "\\\\");
+    escaped.replace("\"", "\\\"");
+    escaped.replace("\n", "\\n");
+    escaped.replace("\r", "\\r");
+    escaped.replace("\t", "\\t");
+
+    QString msg =
+        QString("{\"type\":\"commit_text\",\"text\":\"%1\"}\n").arg(escaped);
+    if (socket_->write(msg.toUtf8()) > 0) {
+      socket_->flush();
+      qDebug() << "Sent commit_text len=" << text.length();
     }
   }
 
@@ -484,6 +558,11 @@ private:
   uint64_t swipeSeq_ = 1;
   uint64_t lastSwipeSeqSent_ = 0;
   int toggleCount_ = 0; // Toggles in current 1s window
+
+  // Backspace repeat state
+  QTimer backspaceRepeatTimer_;
+  QElapsedTimer backspaceHoldElapsed_;
+  bool backspaceHeld_ = false;
 
 signals:
   void stateChanged();

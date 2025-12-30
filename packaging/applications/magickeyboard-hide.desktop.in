@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Hide Magic Keyboard
+Comment=Hide the Magic Keyboard
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/magickeyboardctl hide
+Icon=input-keyboard
+Categories=Utility;Accessibility;
+Terminal=false
+StartupNotify=false

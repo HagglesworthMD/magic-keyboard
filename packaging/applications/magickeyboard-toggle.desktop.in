@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=Toggle Magic Keyboard
+Comment=Toggle the visibility of the Magic Keyboard
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/magickeyboardctl toggle
+Icon=input-keyboard
+Categories=Utility;Accessibility;
+Terminal=false
+StartupNotify=false
+Actions=Show;Hide;
+
+[Desktop Action Show]
+Name=Show Magic Keyboard
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/magickeyboardctl show
+
+[Desktop Action Hide]
+Name=Hide Magic Keyboard
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/magickeyboardctl hide

@@ -62,6 +62,9 @@ private:
   void launchUI();
   void ensureUIRunning();
 
+  // Pick best IC for key injection (current vs cached fallback)
+  fcitx::InputContext *pickTargetInputContext();
+
   // === Clipboard & Shortcut Agent (Agent #7) ===
   void handleShortcutAction(const std::string &action);
   bool isTerminal(const std::string &program);
@@ -113,6 +116,8 @@ private:
 
   // Pointer valid only during callback context
   fcitx::InputContext *currentIC_ = nullptr;
+  // Fallback cache for when currentIC_ is null (lost focus)
+  fcitx::InputContext *lastFocusedIc_ = nullptr;
 
   // v0.2.2 Geometry model
   struct Point {

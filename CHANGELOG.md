@@ -12,3 +12,4 @@
 - **Hardening**: Sanitize and validate Unix socket paths in the UI connection logic.
 - **Deployment**: Improved CMake installation to include dictionary data files.
 - **Deployment**: Added a sample `fcitx5.service` user systemd unit for easier service management.
+- **Packaging**: Fixed broken desktop entries and systemd unit paths by dynamically configuring them with CMake install prefix. Added "Toggle", "Show", and "Hide" actions to app launcher.
