@@ -1,0 +1,22 @@
+{
+  "name": "Dark Blue",
+  "id": "dark-blue",
+  "colors": {
+    "background": "#0d1117",
+    "keyBackground": "#161b22",
+    "keyHover": "#21262d",
+    "keyPressed": "#30363d",
+    "keyBorder": "#30363d",
+    "keyBorderHover": "#58a6ff",
+    "keyText": "#c9d1d9",
+    "specialKeyText": "#58a6ff",
+    "candidateBar": "#010409",
+    "candidateBorder": "#21262d",
+    "swipeTrail": "#58a6ff"
+  },
+  "metrics": {
+    "cornerRadius": 8,
+    "borderWidth": 1,
+    "borderWidthHover": 2
+  }
+}
