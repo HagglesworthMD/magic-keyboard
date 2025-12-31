@@ -23,45 +23,52 @@ Shark2Engine::Shark2Engine() { initializeKeyboard(); }
 // Keyboard Layout Initialization
 // ============================================================================
 void Shark2Engine::initializeKeyboard() {
-  // KeyboardWindowV2 layout with updated dimensions
+  // KeyboardWindowV2 layout with centered rows
+  // Base window: 720px wide
   // Grid unit: 52px, key height: 42px, key gap: 6px
-  // Coordinates are relative to keysContainer
+  // Rows are Qt.AlignHCenter within the window
 
-  const int keyW = 52;                   // gridUnit
-  const int keyH = 42;                   // keyHeight
-  const int spacing = 6;                 // keyGap
-  const int rowSpacing = keyH + spacing; // 48px
+  const double keyW = 52.0;               // gridUnit
+  const double keyH = 42.0;               // keyHeight
+  const double spacing = 6.0;             // keyGap
+  const double keyPitch = keyW + spacing; // 58px per key
+  const double windowW = 720.0;           // Base window width
 
-  // Candidate bar takes ~48px at top, then keyboard rows start
-  // Row positions after candidate bar
-  const int row0_y =
-      0; // QWERTYUIOP (first row after candidate bar in keysContainer)
-  const int row1_y = 1 * rowSpacing; // ASDFGHJKL
-  const int row2_y = 2 * rowSpacing; // ZXCVBNM
+  const double rowSpacing = keyH + spacing; // 48px
 
-  // Row 0: QWERTYUIOP (10 keys)
+  // Row positions (Y)
+  const double row0_y = 0;              // QWERTYUIOP
+  const double row1_y = 1 * rowSpacing; // ASDFGHJKL
+  const double row2_y = 2 * rowSpacing; // ZXCVBNM
+
+  // Row 0: QWERTYUIOP + Backspace (10 + 1.5 = 11.5 units)
+  // Row width = 10 * 58 + 1.5 * 58 = 11.5 * 58 = 667px
+  double row0_width = 10 * keyPitch + 1.5 * keyW;    // Letters only for swipe
+  double row0_startX = (windowW - row0_width) / 2.0; // Centering offset
   const char *row0 = "qwertyuiop";
-  int row0_startX = 0;
   for (int i = 0; i < 10; i++) {
-    double cx = row0_startX + i * (keyW + spacing) + keyW / 2.0;
+    double cx = row0_startX + i * keyPitch + keyW / 2.0;
     double cy = row0_y + keyH / 2.0;
     keyCenters_[row0[i]] = Point(cx, cy);
   }
 
-  // Row 1: ASDFGHJKL (9 keys, offset by ~quarter key for stagger)
+  // Row 1: ASDFGHJKL + Enter (9 + 1.5 = 10.5 units)
+  double row1_width = 9 * keyPitch + 1.5 * keyW;
+  double row1_startX = (windowW - row1_width) / 2.0;
   const char *row1 = "asdfghjkl";
-  int row1_startX = keyW / 4; // Small offset for row stagger
   for (int i = 0; i < 9; i++) {
-    double cx = row1_startX + i * (keyW + spacing) + keyW / 2.0;
+    double cx = row1_startX + i * keyPitch + keyW / 2.0;
     double cy = row1_y + keyH / 2.0;
     keyCenters_[row1[i]] = Point(cx, cy);
   }
 
-  // Row 2: ZXCVBNM (7 keys, offset for shift key)
+  // Row 2: Shift + ZXCVBNM + , + . (1.5 + 7 + 1 + 1 = 10.5 units)
+  double row2_width = 1.5 * keyW + 7 * keyPitch + 2 * keyPitch;
+  double row2_startX = (windowW - row2_width) / 2.0;
+  double row2_lettersX = row2_startX + 1.5 * keyW + spacing; // After 1.5u shift
   const char *row2 = "zxcvbnm";
-  int row2_startX = keyW * 1.5 + spacing; // After 1.5-width shift key
   for (int i = 0; i < 7; i++) {
-    double cx = row2_startX + i * (keyW + spacing) + keyW / 2.0;
+    double cx = row2_lettersX + i * keyPitch + keyW / 2.0;
     double cy = row2_y + keyH / 2.0;
     keyCenters_[row2[i]] = Point(cx, cy);
   }
