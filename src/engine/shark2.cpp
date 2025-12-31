@@ -9,7 +9,6 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
-#include <iostream>
 #include <limits>
 #include <sstream>
 
@@ -73,17 +72,6 @@ void Shark2Engine::initializeKeyboard() {
     double cy = row2_y + keyH / 2.0;
     keyCenters_[row2[i]] = Point(cx, cy);
   }
-
-  // Debug: Print key positions for common test words
-  fprintf(
-      stderr,
-      "SHARK2 init: H=(%.0f,%.0f) E=(%.0f,%.0f) L=(%.0f,%.0f) O=(%.0f,%.0f)\n",
-      keyCenters_['h'].x, keyCenters_['h'].y, keyCenters_['e'].x,
-      keyCenters_['e'].y, keyCenters_['l'].x, keyCenters_['l'].y,
-      keyCenters_['o'].x, keyCenters_['o'].y);
-  fprintf(stderr, "SHARK2 init: T=(%.0f,%.0f) W=(%.0f,%.0f) Q=(%.0f,%.0f)\n",
-          keyCenters_['t'].x, keyCenters_['t'].y, keyCenters_['w'].x,
-          keyCenters_['w'].y, keyCenters_['q'].x, keyCenters_['q'].y);
 }
 
 void Shark2Engine::setKeyboardSize(int width, int height) {
@@ -99,6 +87,10 @@ Point Shark2Engine::getKeyCenter(char c) const {
     return it->second;
   }
   return Point(0, 0);
+}
+
+void Shark2Engine::setKeyCenter(char c, double x, double y) {
+  keyCenters_[std::tolower(c)] = Point(x, y);
 }
 
 // ============================================================================
@@ -434,15 +426,6 @@ std::vector<size_t> Shark2Engine::pruneByStartEnd(const Point &start,
     }
   }
 
-  // Debug output
-  fprintf(stderr,
-          "SHARK2 prune: start=(%.0f,%.0f)->%c(dist=%.0f) "
-          "end=(%.0f,%.0f)->%c(dist=%.0f) radius=%.0f\n",
-          start.x, start.y, closestStart, minStartDist, end.x, end.y,
-          closestEnd, minEndDist, config::PRUNING_RADIUS);
-  fprintf(stderr, "SHARK2 prune: startKeys=%zu endKeys=%zu inputLen=%d\n",
-          startKeys.size(), endKeys.size(), inputLen);
-
   // If no keys found near start/end, use closest
   if (startKeys.empty()) {
     startKeys.push_back(closestStart);
@@ -465,10 +448,6 @@ std::vector<size_t> Shark2Engine::pruneByStartEnd(const Point &start,
       if (li < 0 || li >= 26)
         continue;
 
-      size_t bucketSize = buckets_[fi][li].size();
-      fprintf(stderr, "SHARK2 prune: bucket[%c][%c] has %zu templates\n", sc,
-              ec, bucketSize);
-
       for (size_t idx : buckets_[fi][li]) {
         if (seen[idx])
           continue;
@@ -483,7 +462,6 @@ std::vector<size_t> Shark2Engine::pruneByStartEnd(const Point &start,
     }
   }
 
-  fprintf(stderr, "SHARK2 prune: %zu candidates passed\n", candidates.size());
   return candidates;
 }
 

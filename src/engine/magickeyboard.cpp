@@ -869,6 +869,16 @@ void MagicKeyboardEngine::loadLayout(const std::string &layoutName) {
   }
 
   MKLOG(Info) << "Layout loaded: " << keys_.size() << " keys";
+
+  // Sync letter key positions to SHARK2 engine
+  int syncCount = 0;
+  for (const auto &k : keys_) {
+    if (k.id.length() == 1 && std::isalpha(k.id[0])) {
+      shark2Engine_.setKeyCenter(k.id[0], k.center.x, k.center.y);
+      syncCount++;
+    }
+  }
+  MKLOG(Info) << "Synced " << syncCount << " letter keys to SHARK2";
 }
 
 std::vector<std::string>
@@ -1329,7 +1339,6 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
           msgCand += ",";
       }
       msgCand += "]}\n";
-      MKLOG(Info) << "Sending candidates to UI: " << msgCand.substr(0, 100);
       sendToUI(msgCand);
 
       // Store candidates in engine for selection

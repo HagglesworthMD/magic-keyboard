@@ -369,16 +369,6 @@ Window {
                     });
                 }
                 
-                // Debug: log first and last coordinates
-                if (enginePath.length > 0) {
-                    let first = keyboard.currentPath[0];
-                    let last = keyboard.currentPath[keyboard.currentPath.length - 1];
-                    console.log("Swipe raw: first=(" + first.x.toFixed(0) + "," + first.y.toFixed(0) + 
-                                ") last=(" + last.x.toFixed(0) + "," + last.y.toFixed(0) + 
-                                ") scaleFactor=" + keyboard.scaleFactor.toFixed(3));
-                    console.log("Swipe norm: first=(" + enginePath[0].x.toFixed(0) + "," + enginePath[0].y.toFixed(0) + 
-                                ") last=(" + enginePath[enginePath.length-1].x.toFixed(0) + "," + enginePath[enginePath.length-1].y.toFixed(0) + ")");
-                }
                 
                 // Send keys encountered during swipe for fallback/reinforcement
                 bridge.sendSwipePath(enginePath);

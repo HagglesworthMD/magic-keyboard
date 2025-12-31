@@ -123,6 +123,9 @@ public:
   // Get key center for a character
   Point getKeyCenter(char c) const;
 
+  // Set key center (to sync with layout parser)
+  void setKeyCenter(char c, double x, double y);
+
   // Accessors
   size_t getTemplateCount() const { return templates_.size(); }
 
