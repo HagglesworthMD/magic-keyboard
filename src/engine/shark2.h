@@ -31,7 +31,7 @@ constexpr double LOCATION_WEIGHT = 0.4;  // Weight for location channel
 constexpr double FREQUENCY_WEIGHT = 0.4; // Weight for word frequency (boosted)
 constexpr int MAX_CANDIDATES = 8;        // Maximum results to return
 constexpr double PRUNING_RADIUS =
-    60.0;                           // Pixels tolerance for start/end (relaxed)
+    80.0;                           // Pixels tolerance for start/end (relaxed for trackpad)
 constexpr int LENGTH_TOLERANCE = 5; // Word length tolerance (relaxed)
 } // namespace config
 

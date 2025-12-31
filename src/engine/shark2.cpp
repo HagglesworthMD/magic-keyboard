@@ -435,6 +435,46 @@ std::vector<size_t> Shark2Engine::pruneByStartEnd(const Point &start,
     endKeys.push_back(closestEnd);
   }
 
+  // Add neighbor keys to expand search for better accuracy
+  // QWERTY adjacency map
+  static const std::unordered_map<char, std::string> neighbors = {
+      {'q', "wa"},     {'w', "qase"},   {'e', "wsdr"},   {'r', "edft"},
+      {'t', "rfgy"},   {'y', "tghu"},   {'u', "yhji"},   {'i', "ujko"},
+      {'o', "iklp"},   {'p', "ol"},     {'a', "qwsz"},   {'s', "awedxz"},
+      {'d', "serfcx"}, {'f', "drtgvc"}, {'g', "ftyhbv"}, {'h', "gyujnb"},
+      {'j', "huikmn"}, {'k', "jiolm"},  {'l', "kop"},    {'z', "asx"},
+      {'x', "zsdc"},   {'c', "xdfv"},   {'v', "cfgb"},   {'b', "vghn"},
+      {'n', "bhjm"},   {'m', "njk"}};
+
+  std::vector<char> expandedStart = startKeys;
+  std::vector<char> expandedEnd = endKeys;
+
+  for (char c : startKeys) {
+    if (neighbors.count(c)) {
+      for (char n : neighbors.at(c)) {
+        if (std::find(expandedStart.begin(), expandedStart.end(), n) ==
+            expandedStart.end()) {
+          expandedStart.push_back(n);
+        }
+      }
+    }
+  }
+
+  for (char c : endKeys) {
+    if (neighbors.count(c)) {
+      for (char n : neighbors.at(c)) {
+        if (std::find(expandedEnd.begin(), expandedEnd.end(), n) ==
+            expandedEnd.end()) {
+          expandedEnd.push_back(n);
+        }
+      }
+    }
+  }
+
+  // Use expanded lists for better recall
+  startKeys = expandedStart;
+  endKeys = expandedEnd;
+
   // Collect templates from matching buckets
   std::vector<bool> seen(templates_.size(), false);
 
@@ -486,6 +526,38 @@ Shark2Engine::recognize(const std::vector<Point> &inputPoints,
     return {};
   }
 
+  // Get start/end points for quick checks
+  Point start = inputPoints.front();
+  Point end = inputPoints.back();
+
+  // Common word fast path - bypass complex matching for very common words
+  static const std::vector<std::string> commonWords = {
+      "the",  "be",   "to",   "of",   "and",  "a",    "in",   "that",
+      "have", "i",    "it",   "for",  "not",  "on",   "with", "he",
+      "as",   "you",  "do",   "at",   "this", "but",  "his",  "by",
+      "from", "they", "we",   "say",  "her",  "she",  "or",   "an",
+      "will", "my",   "one",  "all",  "would", "there", "their"};
+
+  std::vector<Candidate> quickMatches;
+  for (const auto &word : commonWords) {
+    if (word.length() < 2)
+      continue;
+
+    Point expectedStart = getKeyCenter(word[0]);
+    Point expectedEnd = getKeyCenter(word.back());
+
+    double startDist = start.distance(expectedStart);
+    double endDist = end.distance(expectedEnd);
+
+    // Quick accept if start/end are close
+    if (startDist < 60.0 && endDist < 60.0) {
+      Candidate c;
+      c.word = word;
+      c.score = 0.75 - (startDist + endDist) / 300.0; // High base score
+      quickMatches.push_back(c);
+    }
+  }
+
   // Estimate input word length from gesture
   // Rough heuristic: count direction changes or use path length
   int estimatedLen = std::max(2, static_cast<int>(inputPoints.size() / 10));
@@ -498,8 +570,6 @@ Shark2Engine::recognize(const std::vector<Point> &inputPoints,
   std::vector<Point> normalizedInput = normalizeShape(sampled);
 
   // Stage 2: Prune by start/end
-  Point start = inputPoints.front();
-  Point end = inputPoints.back();
   std::vector<size_t> candidateIndices =
       pruneByStartEnd(start, end, estimatedLen);
 
@@ -536,11 +606,48 @@ Shark2Engine::recognize(const std::vector<Point> &inputPoints,
     double shapeScore = 1.0 / (1.0 + cand.shapeDistance * 10);
     double locationScore = 1.0 / (1.0 + cand.locationDistance / 50.0);
 
+    // Start/end match bonus - reward when input clearly lands on correct keys
+    double startEndBonus = 0.0;
+    if (tmpl.word.length() > 0) {
+      char firstChar = std::tolower(tmpl.word[0]);
+      char lastChar = std::tolower(tmpl.word.back());
+
+      double startDist = start.distance(getKeyCenter(firstChar));
+      double endDist = end.distance(getKeyCenter(lastChar));
+
+      // Bonus for landing close to expected keys
+      if (startDist < 40.0)
+        startEndBonus += 0.15;
+      if (endDist < 40.0)
+        startEndBonus += 0.15;
+    }
+
+    // Length-based bonus - longer words are easier to distinguish
+    double lengthBonus = std::min(0.2, tmpl.word.length() * 0.03);
+
     cand.score = config::SHAPE_WEIGHT * shapeScore +
                  config::LOCATION_WEIGHT * locationScore +
-                 config::FREQUENCY_WEIGHT * cand.frequencyScore;
+                 config::FREQUENCY_WEIGHT * cand.frequencyScore + startEndBonus +
+                 lengthBonus;
 
     results.push_back(cand);
+  }
+
+  // Merge quick matches with full results
+  for (const auto &qm : quickMatches) {
+    // Check if this word is already in results
+    bool found = false;
+    for (auto &r : results) {
+      if (r.word == qm.word) {
+        // Keep the better score
+        r.score = std::max(r.score, qm.score);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      results.push_back(qm);
+    }
   }
 
   // Sort by score (descending)
