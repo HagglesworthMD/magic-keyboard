@@ -1219,18 +1219,6 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
     }
 
     if (!candidates.empty()) {
-      // Auto-commit: immediately commit the top candidate with a space
-      auto *ic = pickTargetInputContext();
-      if (ic) {
-        std::string word = candidates[0].word + " ";
-        ic->commitString(word);
-        MKLOG(Info) << "AutoCommit swipe word=" << candidates[0].word
-                    << " (shark2=" << usedShark2 << ")";
-        recordWordCommit(candidates[0].word);
-        candidateMode_ = false;
-        currentCandidates_.clear();
-      }
-
       // Send keys for debug highlight with sequence echo
       std::string msgKeys =
           "{\"type\":\"swipe_keys\",\"seq\":" + std::to_string(seq_num) +
@@ -1245,8 +1233,22 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
       msgKeys += "]}\n";
       sendToUI(msgKeys);
 
-      // Clear candidates in UI since we auto-committed
-      sendToUI("{\"type\":\"swipe_candidates\",\"candidates\":[]}\n");
+      // Send actual candidates to UI (include sequence)
+      std::string msgCand =
+          "{\"type\":\"swipe_candidates\",\"seq\":" + std::to_string(seq_num) +
+          ",\"candidates\":[";
+      for (size_t i = 0; i < candidates.size(); ++i) {
+        msgCand += "{\"word\":\"" + candidates[i].word +
+                   "\",\"score\":" + std::to_string(candidates[i].score) + "}";
+        if (i < candidates.size() - 1)
+          msgCand += ",";
+      }
+      msgCand += "]}\n";
+      sendToUI(msgCand);
+
+      // Store candidates in engine for selection
+      currentCandidates_ = candidates;
+      candidateMode_ = true;
     }
   } else if (line.find("\"type\":\"hello\"") != std::string::npos) {
     auto pos = line.find("\"role\":\"");

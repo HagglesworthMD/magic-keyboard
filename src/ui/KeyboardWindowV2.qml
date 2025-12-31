@@ -358,13 +358,18 @@ Window {
             console.log("onReleased: isSwiping=" + keyboard.isSwiping + " activeKey=" + (keyboard.activeKey ? keyboard.activeKey.code : "null"));
             if (keyboard.isSwiping) {
                 let duration = Date.now() - keyboard.startTime;
-                console.log("Swipe: points=" + keyboard.currentPath.length + " duration=" + duration + "ms");
+                console.log("Swipe complete: points=" + keyboard.currentPath.length + " duration=" + duration + "ms");
                 
-                // Send path to engine
+                // Send normalized path to engine (divide by scaleFactor to match engine's base model)
                 let enginePath = [];
                 for (let p of keyboard.currentPath) {
-                    enginePath.push({x: p.x, y: p.y});
+                    enginePath.push({
+                        x: p.x / keyboard.scaleFactor, 
+                        y: p.y / keyboard.scaleFactor
+                    });
                 }
+                
+                // Send keys encountered during swipe for fallback/reinforcement
                 bridge.sendSwipePath(enginePath);
                 
                 fadeTimer.start();
