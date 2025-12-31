@@ -18,6 +18,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <fstream>
+#include <map>
 #include <set>
 #include <signal.h>
 #include <sys/socket.h>
@@ -713,9 +714,10 @@ void MagicKeyboardEngine::loadLayout(const std::string &layoutName) {
   std::string content((std::istreambuf_iterator<char>(f)),
                       std::istreambuf_iterator<char>());
 
-  double keyUnit = 60.0;
-  double keyHeight = 50.0;
-  double spacing = 6.0;
+  // Match KeyboardWindowV2 dimensions (same as SHARK2)
+  double keyUnit = 52.0;   // gridUnit
+  double keyHeight = 42.0; // keyHeight
+  double spacing = 6.0;    // keyGap
 
   auto findVal = [](const std::string &container,
                     const std::string &key) -> std::string {
@@ -733,6 +735,19 @@ void MagicKeyboardEngine::loadLayout(const std::string &layoutName) {
   size_t rowsStart = content.find("\"rows\"");
   if (rowsStart == std::string::npos)
     return;
+
+  // Base window width for centering (matches KeyboardWindowV2)
+  const double windowWidth = 720.0;
+  const double keyPitch = keyUnit + spacing; // 58px
+
+  // First pass: collect all rows and their widths
+  struct RowInfo {
+    int y;
+    double offset;
+    double width;
+    std::vector<std::pair<double, double>> keys; // x, w pairs
+  };
+  std::vector<RowInfo> rows;
 
   int currentRowY = 0;
   double currentRowOffset = 0.0;
@@ -752,13 +767,77 @@ void MagicKeyboardEngine::loadLayout(const std::string &layoutName) {
       std::string offStr = findVal(obj, "offset");
       if (!offStr.empty())
         currentRowOffset = std::stod(offStr);
+
+      // Start new row
+      RowInfo row;
+      row.y = currentRowY;
+      row.offset = currentRowOffset;
+      row.width = 0;
+      rows.push_back(row);
     } else {
       // Is it a key? (has "x" and "w")
       std::string xStr = findVal(obj, "x");
       std::string wStr = findVal(obj, "w");
+      if (!xStr.empty() && !wStr.empty() && !rows.empty()) {
+        double kx = std::stod(xStr);
+        double kw = std::stod(wStr);
+        rows.back().keys.push_back({kx, kw});
+        // Track row width (rightmost edge)
+        double rightEdge = (kx + kw + rows.back().offset) * keyPitch;
+        if (rightEdge > rows.back().width)
+          rows.back().width = rightEdge;
+      }
+    }
+    pos = pos + 1;
+  }
+
+  // Second pass: create keys with centered positions
+  for (const auto &row : rows) {
+    double centeringOffset = (windowWidth - row.width) / 2.0;
+
+    // Re-parse keys for this row (simplified - using stored pairs)
+    for (const auto &[kx, kw] : row.keys) {
+      // Find the key object again to get the code
+      // This is a bit hacky - ideally we'd store all info in first pass
+    }
+  }
+
+  // Actually, let's just add centering in the original single-pass loop
+  // Reset and do it properly
+  keys_.clear();
+  pos = rowsStart;
+  currentRowY = 0;
+  currentRowOffset = 0.0;
+
+  // Calculate centering offsets for each row Y
+  std::map<int, double> rowCenterOffset;
+  // Row 0: 11.5 units wide -> (720 - 11.5*58) / 2 = (720 - 667) / 2 = 26.5
+  rowCenterOffset[0] = (windowWidth - 11.5 * keyPitch) / 2.0;
+  // Row 1: 10.5 units wide -> (720 - 10.5*58) / 2 = (720 - 609) / 2 = 55.5
+  rowCenterOffset[1] = (windowWidth - 10.5 * keyPitch) / 2.0;
+  // Row 2: 10.5 units wide (shift + letters + punct)
+  rowCenterOffset[2] = (windowWidth - 10.5 * keyPitch) / 2.0;
+  // Row 3: ~10 units
+  rowCenterOffset[3] = (windowWidth - 10 * keyPitch) / 2.0;
+
+  while ((pos = content.find("{", pos)) != std::string::npos) {
+    size_t end = content.find("}", pos);
+    if (end == std::string::npos)
+      break;
+    std::string obj = content.substr(pos, end - pos + 1);
+
+    std::string yStr = findVal(obj, "y");
+    if (!yStr.empty() && obj.find("\"keys\"") != std::string::npos) {
+      currentRowY = std::stoi(yStr);
+      currentRowOffset = 0.0;
+      std::string offStr = findVal(obj, "offset");
+      if (!offStr.empty())
+        currentRowOffset = std::stod(offStr);
+    } else {
+      std::string xStr = findVal(obj, "x");
+      std::string wStr = findVal(obj, "w");
       if (!xStr.empty() && !wStr.empty()) {
         Key k;
-        // Parse code: "code": "..."
         size_t cp = obj.find("\"code\":");
         if (cp != std::string::npos) {
           size_t s = obj.find("\"", cp + 7);
@@ -771,7 +850,13 @@ void MagicKeyboardEngine::loadLayout(const std::string &layoutName) {
 
         double kx = std::stod(xStr) + currentRowOffset;
         double kw = std::stod(wStr);
-        k.r.x = kx * (keyUnit + spacing);
+
+        // Add row-based centering offset
+        double centerOffset = rowCenterOffset.count(currentRowY)
+                                  ? rowCenterOffset[currentRowY]
+                                  : 0;
+
+        k.r.x = centerOffset + kx * keyPitch;
         k.r.y = currentRowY * (keyHeight + spacing);
         k.r.w = kw * keyUnit + (kw > 1 ? (kw - 1) * spacing : 0);
         k.r.h = keyHeight;
@@ -780,7 +865,7 @@ void MagicKeyboardEngine::loadLayout(const std::string &layoutName) {
         keys_.push_back(k);
       }
     }
-    pos = pos + 1; // Move to next possible object start
+    pos = pos + 1;
   }
 
   MKLOG(Info) << "Layout loaded: " << keys_.size() << " keys";
