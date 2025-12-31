@@ -16,9 +16,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
-#include <set>
 #include <fcntl.h>
 #include <fstream>
+#include <set>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -238,8 +238,9 @@ void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
     return;
   }
 
-  // CRITICAL FIX: When UI is visible, ignore focus changes to preserve typing target
-  // The UI window might trigger FocusIn events even with WindowDoesNotAcceptFocus
+  // CRITICAL FIX: When UI is visible, ignore focus changes to preserve typing
+  // target The UI window might trigger FocusIn events even with
+  // WindowDoesNotAcceptFocus
   if (visibilityState_ == VisibilityState::Visible) {
     MKLOG(Info) << "FocusIn while UI visible - ignoring to preserve typing IC "
                 << (void *)preservedIC_;
@@ -288,11 +289,13 @@ void MagicKeyboardEngine::handleFocusOut(fcitx::InputContext *ic) {
   MKLOG(Info) << "FocusOut: " << program
               << " state=" << static_cast<int>(visibilityState_);
 
-  // CRITICAL FIX: When UI is visible, ignore focus changes to preserve typing target
+  // CRITICAL FIX: When UI is visible, ignore focus changes to preserve typing
+  // target
   if (visibilityState_ == VisibilityState::Visible) {
     MKLOG(Info) << "FocusOut while UI visible - ignoring to preserve typing IC "
                 << (void *)preservedIC_;
-    // Do NOT clear currentIC_ or trigger hide - keep keyboard visible with preserved IC
+    // Do NOT clear currentIC_ or trigger hide - keep keyboard visible with
+    // preserved IC
     return;
   }
 
@@ -363,11 +366,12 @@ void MagicKeyboardEngine::executeShow() {
   if (currentIC_ != nullptr) {
     preservedIC_ = currentIC_;
     MKLOG(Info) << "Preserved IC for typing: " << (void *)preservedIC_
-                << " program=" << (preservedIC_ ? preservedIC_->program() : "?");
+                << " program="
+                << (preservedIC_ ? preservedIC_->program() : "?");
   } else if (lastFocusedIc_ != nullptr) {
     preservedIC_ = lastFocusedIc_;
-    MKLOG(Info) << "Preserved lastFocusedIc for typing: " << (void *)preservedIC_
-                << " program="
+    MKLOG(Info) << "Preserved lastFocusedIc for typing: "
+                << (void *)preservedIC_ << " program="
                 << (preservedIC_ ? preservedIC_->program() : "?");
   } else {
     MKLOG(Warn) << "executeShow: no IC to preserve (typing will fail!)";
@@ -641,6 +645,14 @@ void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
     ic->forwardKey(fcitx::Key(FcitxKey_Right), false);
     ic->forwardKey(fcitx::Key(FcitxKey_Right), true);
     MKLOG(Debug) << "forwardKey: Right";
+  } else if (key == "up") {
+    ic->forwardKey(fcitx::Key(FcitxKey_Up), false);
+    ic->forwardKey(fcitx::Key(FcitxKey_Up), true);
+    MKLOG(Debug) << "forwardKey: Up";
+  } else if (key == "down") {
+    ic->forwardKey(fcitx::Key(FcitxKey_Down), false);
+    ic->forwardKey(fcitx::Key(FcitxKey_Down), true);
+    MKLOG(Debug) << "forwardKey: Down";
   } else if (key == "space") {
     ic->forwardKey(fcitx::Key(FcitxKey_space), false);
     ic->forwardKey(fcitx::Key(FcitxKey_space), true);
@@ -649,7 +661,29 @@ void MagicKeyboardEngine::handleKeyPress(const std::string &key) {
     ic->forwardKey(fcitx::Key(FcitxKey_Tab), false);
     ic->forwardKey(fcitx::Key(FcitxKey_Tab), true);
     MKLOG(Debug) << "forwardKey: Tab";
+  } else if (key.length() == 1) {
+    // Single character: use forwardKey for better app compatibility
+    char c = key[0];
+    fcitx::KeySym sym;
+
+    // Map character to KeySym
+    if (c >= 'a' && c <= 'z') {
+      sym = static_cast<fcitx::KeySym>(FcitxKey_a + (c - 'a'));
+    } else if (c >= 'A' && c <= 'Z') {
+      sym = static_cast<fcitx::KeySym>(FcitxKey_A + (c - 'A'));
+    } else if (c >= '0' && c <= '9') {
+      sym = static_cast<fcitx::KeySym>(FcitxKey_0 + (c - '0'));
+    } else {
+      // Punctuation and other characters
+      sym = static_cast<fcitx::KeySym>(c);
+    }
+
+    fcitx::Key pressKey(sym);
+    ic->forwardKey(pressKey, false); // Press
+    ic->forwardKey(pressKey, true);  // Release
+    MKLOG(Debug) << "forwardKey: char '" << c << "'";
   } else {
+    // Multi-character strings: use commitString
     ic->commitString(key);
     MKLOG(Debug) << "commitString: '" << key << "'";
   }
@@ -908,7 +942,8 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
         auto *ic = pickTargetInputContext();
         if (ic) {
           ic->commitString(text);
-          MKLOG(Info) << "CommitCand word=" << text << " program=" << ic->program();
+          MKLOG(Info) << "CommitCand word=" << text
+                      << " program=" << ic->program();
           // Record for adaptive learning
           recordWordCommit(text);
           candidateMode_ = false;
@@ -1137,7 +1172,8 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
           keysString += std::tolower(s[0]);
         }
       }
-      MKLOG(Info) << "Swipe keys from path: " << keysString << " (from " << seq.size() << " raw keys)";
+      MKLOG(Info) << "Swipe keys from path: " << keysString << " (from "
+                  << seq.size() << " raw keys)";
     }
 
     // Try SHARK2 recognition first if we have path points
@@ -1152,7 +1188,7 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
       // Convert to SHARK2 point format
       std::vector<shark2::Point> shark2Path;
       shark2Path.reserve(path.size());
-      for (const auto& pt : path) {
+      for (const auto &pt : path) {
         shark2Path.emplace_back(pt.x, pt.y);
       }
 
@@ -1161,11 +1197,12 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
                   << shark2Path.back().x << "," << shark2Path.back().y << ")";
 
       auto shark2Results = shark2Engine_.recognize(shark2Path, 8);
-      MKLOG(Info) << "SHARK2 results: " << shark2Results.size() << " candidates";
+      MKLOG(Info) << "SHARK2 results: " << shark2Results.size()
+                  << " candidates";
 
       if (!shark2Results.empty()) {
         usedShark2 = true;
-        for (const auto& r : shark2Results) {
+        for (const auto &r : shark2Results) {
           candidates.push_back({r.word, r.score});
         }
         MKLOG(Info) << "SHARK2 recognized: top=" << candidates[0].word
@@ -1176,7 +1213,8 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
 
     // Fall back to key-sequence based matching if SHARK2 didn't work
     if (candidates.empty() && !keysString.empty()) {
-      candidates = generateCandidates(keysString, path.size() > 0 ? path.size() : keysString.size());
+      candidates = generateCandidates(
+          keysString, path.size() > 0 ? path.size() : keysString.size());
       MKLOG(Info) << "Fallback to key-sequence matching: " << keysString;
     }
 
@@ -1293,15 +1331,18 @@ void MagicKeyboardEngine::startWatchdog() {
         // Watchdog only acts when keyboard is visible or pending hide
         if (visibilityState_ == VisibilityState::Visible ||
             visibilityState_ == VisibilityState::PendingHide) {
-          // FIXED: When UI is visible, check preserved IC instead of fcitx's lastFocused
-          auto *ic = (visibilityState_ == VisibilityState::Visible && preservedIC_)
-                         ? preservedIC_
-                         : instance_->inputContextManager().lastFocusedInputContext();
+          // FIXED: When UI is visible, check preserved IC instead of fcitx's
+          // lastFocused
+          auto *ic =
+              (visibilityState_ == VisibilityState::Visible && preservedIC_)
+                  ? preservedIC_
+                  : instance_->inputContextManager().lastFocusedInputContext();
 
           // For preserved IC, we trust it's still valid even without focus
           bool shouldHide = false;
           if (visibilityState_ == VisibilityState::Visible && preservedIC_) {
-            // Don't auto-hide when using preserved IC - user must hide explicitly
+            // Don't auto-hide when using preserved IC - user must hide
+            // explicitly
             shouldHide = false;
           } else if (!ic || !ic->hasFocus()) {
             shouldHide = true;
@@ -1519,46 +1560,47 @@ void MagicKeyboardEngine::loadDictionary() {
   if (useShark2_) {
     std::vector<std::pair<std::string, uint32_t>> shark2Words;
     shark2Words.reserve(dictionary_.size());
-    for (const auto& dw : dictionary_) {
+    for (const auto &dw : dictionary_) {
       // SHARK2 expects frequency rank (lower = better), not raw frequency
       // Convert: higher raw freq -> lower rank
       uint32_t rank = dw.freq > 0 ? (100000 / (dw.freq + 1)) : 50000;
       shark2Words.emplace_back(dw.word, rank);
     }
-    shark2Engine_.setKeyboardSize(580, 200);  // Match compact UI
+    shark2Engine_.setKeyboardSize(580, 200); // Match compact UI
     shark2Engine_.loadDictionaryWithFrequency(shark2Words);
-    MKLOG(Info) << "SHARK2 engine loaded " << shark2Engine_.getTemplateCount() << " templates";
+    MKLOG(Info) << "SHARK2 engine loaded " << shark2Engine_.getTemplateCount()
+                << " templates";
   }
 }
 
 // Keyboard adjacency map for QWERTY layout
 static const std::vector<std::vector<char>> adjacentKeys = {
-    {'q', 's', 'z', 'w'},                   // a
-    {'v', 'g', 'h', 'n'},                   // b
-    {'x', 'd', 'f', 'v'},                   // c
-    {'s', 'e', 'r', 'f', 'c', 'x'},         // d
-    {'w', 's', 'd', 'r'},                   // e
-    {'d', 'r', 't', 'g', 'v', 'c'},         // f
-    {'f', 't', 'y', 'h', 'b', 'v'},         // g
-    {'g', 'y', 'u', 'j', 'n', 'b'},         // h
-    {'u', 'j', 'k', 'o'},                   // i
-    {'h', 'u', 'i', 'k', 'm', 'n'},         // j
-    {'j', 'i', 'o', 'l', 'm'},              // k
-    {'k', 'o', 'p'},                        // l
-    {'n', 'j', 'k'},                        // m
-    {'b', 'h', 'j', 'm'},                   // n
-    {'i', 'k', 'l', 'p'},                   // o
-    {'o', 'l'},                             // p
-    {'w', 'a', 's'},                        // q
-    {'e', 'd', 'f', 't'},                   // r
-    {'a', 'w', 'e', 'd', 'x', 'z'},         // s
-    {'r', 'f', 'g', 'y'},                   // t
-    {'y', 'h', 'j', 'i'},                   // u
-    {'c', 'f', 'g', 'b'},                   // v
-    {'q', 'a', 's', 'e'},                   // w
-    {'z', 's', 'd', 'c'},                   // x
-    {'t', 'g', 'h', 'u'},                   // y
-    {'a', 's', 'x'},                        // z
+    {'q', 's', 'z', 'w'},           // a
+    {'v', 'g', 'h', 'n'},           // b
+    {'x', 'd', 'f', 'v'},           // c
+    {'s', 'e', 'r', 'f', 'c', 'x'}, // d
+    {'w', 's', 'd', 'r'},           // e
+    {'d', 'r', 't', 'g', 'v', 'c'}, // f
+    {'f', 't', 'y', 'h', 'b', 'v'}, // g
+    {'g', 'y', 'u', 'j', 'n', 'b'}, // h
+    {'u', 'j', 'k', 'o'},           // i
+    {'h', 'u', 'i', 'k', 'm', 'n'}, // j
+    {'j', 'i', 'o', 'l', 'm'},      // k
+    {'k', 'o', 'p'},                // l
+    {'n', 'j', 'k'},                // m
+    {'b', 'h', 'j', 'm'},           // n
+    {'i', 'k', 'l', 'p'},           // o
+    {'o', 'l'},                     // p
+    {'w', 'a', 's'},                // q
+    {'e', 'd', 'f', 't'},           // r
+    {'a', 'w', 'e', 'd', 'x', 'z'}, // s
+    {'r', 'f', 'g', 'y'},           // t
+    {'y', 'h', 'j', 'i'},           // u
+    {'c', 'f', 'g', 'b'},           // v
+    {'q', 'a', 's', 'e'},           // w
+    {'z', 's', 'd', 'c'},           // x
+    {'t', 'g', 'h', 'u'},           // y
+    {'a', 's', 'x'},                // z
 };
 
 std::vector<int> MagicKeyboardEngine::getShortlist(const std::string &keys) {
@@ -1749,7 +1791,7 @@ void MagicKeyboardEngine::handleSettingsRequest(int clientFd) {
 }
 
 void MagicKeyboardEngine::handleSettingUpdate(const std::string &key,
-                                               const std::string &value) {
+                                              const std::string &value) {
   if (SettingsManager::instance().setSingle(key, value)) {
     MKLOG(Info) << "Setting updated: " << key << " = " << value;
     sendSettingsToUI();

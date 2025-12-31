@@ -20,7 +20,7 @@ Window {
     // Window dimensions computed from grid system
     // These will update automatically when scaleFactor changes
     width: 720 * scaleFactor
-    height: 240 * scaleFactor
+    height: 310 * scaleFactor
     visible: false
     color: "transparent"  // Allow opacity control
     title: "Magic Keyboard"
@@ -203,10 +203,16 @@ Window {
     }
     
     function commitKey(key) {
+        console.log("commitKey: code=" + key.code + " action=" + key.action);
         if (key.code === "shift") {
             shiftActive = !shiftActive;
+        } else if (key.code === "paste") {
+            // Paste uses direct clipboard access (more reliable than Ctrl+V forwarding)
+            console.log("Using pasteFromClipboard");
+            bridge.pasteFromClipboard();
         } else if (key.action) {
-            // Action keys route through sendAction (copy, paste, cut, selectall)
+            // Other action keys route through sendAction (copy, cut, selectall)
+            console.log("Sending action: " + key.code);
             bridge.sendAction(key.code);
         } else {
             sendKey(key.code);
@@ -312,7 +318,7 @@ Window {
                         keyboard.isSwiping = true;
                         if (keyboard.activeKey) keyboard.activeKey.isPressed = false;
                         
-                        let lp = keyboard.mapToItem(keysContainer, mouse.x, mouse.y);
+                        let lp = keysContainer.mapFromItem(masterMouse, mouse.x, mouse.y);
                         keyboard.currentPath = [{wx: mouse.x, wy: mouse.y, x: lp.x, y: lp.y}];
                         trailCanvas.requestPaint();
                     }
@@ -325,7 +331,7 @@ Window {
                     let rdist = Math.sqrt(Math.pow(nwx - last.wx, 2) + Math.pow(nwy - last.wy, 2));
                     
                     if (rdist >= keyboard.resampleDist) {
-                        let nlp = keyboard.mapToItem(keysContainer, nwx, nwy);
+                        let nlp = keysContainer.mapFromItem(masterMouse, nwx, nwy);
                         keyboard.currentPath.push({wx: nwx, wy: nwy, x: nlp.x, y: nlp.y});
                         trailCanvas.requestPaint();
                     }
@@ -349,6 +355,7 @@ Window {
         }
         
         onReleased: (mouse) => {
+            console.log("onReleased: isSwiping=" + keyboard.isSwiping + " activeKey=" + (keyboard.activeKey ? keyboard.activeKey.code : "null"));
             if (keyboard.isSwiping) {
                 let duration = Date.now() - keyboard.startTime;
                 console.log("Swipe: points=" + keyboard.currentPath.length + " duration=" + duration + "ms");
@@ -363,8 +370,11 @@ Window {
                 fadeTimer.start();
             } else {
                 if (keyboard.activeKey) {
+                    console.log("Committing key: " + keyboard.activeKey.code);
                     keyboard.activeKey.isPressed = false;
                     keyboard.commitKey(keyboard.activeKey);
+                } else {
+                    console.log("No activeKey to commit!");
                 }
             }
             
@@ -696,16 +706,34 @@ Window {
                 KeyBtn { label: "."; code: "."; kw: 1.0 }
             }
             
-            // Row 4: Action row
+            // Row 4: Numbers + Arrow keys
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 0
 
-                KeyBtn { label: "Copy"; code: "copy"; kw: 1.25; action: true }
-                KeyBtn { label: "Paste"; code: "paste"; kw: 1.25; action: true }
-                KeyBtn { label: ""; code: "space"; kw: 5.0; special: true }
-                KeyBtn { label: "Cut"; code: "cut"; kw: 1.25; action: true }
-                KeyBtn { label: "SelAll"; code: "selectall"; kw: 1.25; action: true }
+                Repeater {
+                    model: ["1","2","3","4","5","6","7","8","9","0"]
+                    KeyBtn { label: modelData; code: modelData; kw: 0.85 }
+                }
+                
+                // Arrow keys
+                KeyBtn { label: "←"; code: "left"; kw: 0.9; special: true }
+                KeyBtn { label: "→"; code: "right"; kw: 0.9; special: true }
+            }
+            
+            // Row 5: Action row
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 0
+
+                KeyBtn { label: "Tab"; code: "tab"; kw: 1.0; special: true }
+                KeyBtn { label: "Copy"; code: "copy"; kw: 1.1; action: true }
+                KeyBtn { label: "Paste"; code: "paste"; kw: 1.1; action: true }
+                KeyBtn { label: ""; code: "space"; kw: 4.5; special: true }
+                KeyBtn { label: "Cut"; code: "cut"; kw: 1.0; action: true }
+                KeyBtn { label: "Sel"; code: "selectall"; kw: 1.0; action: true }
+                KeyBtn { label: "↑"; code: "up"; kw: 0.8; special: true }
+                KeyBtn { label: "↓"; code: "down"; kw: 0.8; special: true }
             }
         }
     }

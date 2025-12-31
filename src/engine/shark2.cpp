@@ -17,531 +17,553 @@ namespace shark2 {
 // ============================================================================
 // Constructor
 // ============================================================================
-Shark2Engine::Shark2Engine() {
-    initializeKeyboard();
-}
+Shark2Engine::Shark2Engine() { initializeKeyboard(); }
 
 // ============================================================================
 // Keyboard Layout Initialization
 // ============================================================================
 void Shark2Engine::initializeKeyboard() {
-    // QWERTY layout for 580x200 keyboard (matching compact UI)
-    // Key size: 32x28, spacing: 3px
-    // Coordinates are relative to keysContainer (not window)
+  // KeyboardWindowV2 layout with updated dimensions
+  // Grid unit: 52px, key height: 42px, key gap: 6px
+  // Coordinates are relative to keysContainer
 
-    const int keyW = 32;
-    const int keyH = 28;
-    const int spacing = 3;
+  const int keyW = 52;                   // gridUnit
+  const int keyH = 42;                   // keyHeight
+  const int spacing = 6;                 // keyGap
+  const int rowSpacing = keyH + spacing; // 48px
 
-    // Row positions (relative to keysContainer, after candidate bar)
-    // From QML: spacing: 3, so rows are at 0, 31, 62, 93
-    const int row0_y = 0;    // QWERTYUIOP
-    const int row1_y = 31;   // ASDFGHJKL
-    const int row2_y = 62;   // ZXCVBNM
+  // Candidate bar takes ~48px at top, then keyboard rows start
+  // Row positions after candidate bar
+  const int row0_y =
+      0; // QWERTYUIOP (first row after candidate bar in keysContainer)
+  const int row1_y = 1 * rowSpacing; // ASDFGHJKL
+  const int row2_y = 2 * rowSpacing; // ZXCVBNM
 
-    // Row 0: QWERTYUIOP (10 keys, roughly centered)
-    const char* row0 = "qwertyuiop";
-    int row0_startX = 8;  // Starting X position
-    for (int i = 0; i < 10; i++) {
-        double cx = row0_startX + i * (keyW + spacing) + keyW / 2.0;
-        double cy = row0_y + keyH / 2.0;
-        keyCenters_[row0[i]] = Point(cx, cy);
-    }
+  // Row 0: QWERTYUIOP (10 keys)
+  const char *row0 = "qwertyuiop";
+  int row0_startX = 0;
+  for (int i = 0; i < 10; i++) {
+    double cx = row0_startX + i * (keyW + spacing) + keyW / 2.0;
+    double cy = row0_y + keyH / 2.0;
+    keyCenters_[row0[i]] = Point(cx, cy);
+  }
 
-    // Row 1: ASDFGHJKL (9 keys, offset by ~half key)
-    const char* row1 = "asdfghjkl";
-    int row1_startX = row0_startX + 8 + keyW / 2;  // Offset for indent
-    for (int i = 0; i < 9; i++) {
-        double cx = row1_startX + i * (keyW + spacing) + keyW / 2.0;
-        double cy = row1_y + keyH / 2.0;
-        keyCenters_[row1[i]] = Point(cx, cy);
-    }
+  // Row 1: ASDFGHJKL (9 keys, offset by ~quarter key for stagger)
+  const char *row1 = "asdfghjkl";
+  int row1_startX = keyW / 4; // Small offset for row stagger
+  for (int i = 0; i < 9; i++) {
+    double cx = row1_startX + i * (keyW + spacing) + keyW / 2.0;
+    double cy = row1_y + keyH / 2.0;
+    keyCenters_[row1[i]] = Point(cx, cy);
+  }
 
-    // Row 2: ZXCVBNM (7 keys, offset more for shift key)
-    const char* row2 = "zxcvbnm";
-    int row2_startX = row0_startX + keyW + spacing + keyW / 2;  // After shift key
-    for (int i = 0; i < 7; i++) {
-        double cx = row2_startX + i * (keyW + spacing) + keyW / 2.0;
-        double cy = row2_y + keyH / 2.0;
-        keyCenters_[row2[i]] = Point(cx, cy);
-    }
+  // Row 2: ZXCVBNM (7 keys, offset for shift key)
+  const char *row2 = "zxcvbnm";
+  int row2_startX = keyW * 1.5 + spacing; // After 1.5-width shift key
+  for (int i = 0; i < 7; i++) {
+    double cx = row2_startX + i * (keyW + spacing) + keyW / 2.0;
+    double cy = row2_y + keyH / 2.0;
+    keyCenters_[row2[i]] = Point(cx, cy);
+  }
 }
 
 void Shark2Engine::setKeyboardSize(int width, int height) {
-    keyboardWidth_ = width;
-    keyboardHeight_ = height;
-    // Could rescale key positions here if needed
+  keyboardWidth_ = width;
+  keyboardHeight_ = height;
+  // Could rescale key positions here if needed
 }
 
 Point Shark2Engine::getKeyCenter(char c) const {
-    c = std::tolower(c);
-    auto it = keyCenters_.find(c);
-    if (it != keyCenters_.end()) {
-        return it->second;
-    }
-    return Point(0, 0);
+  c = std::tolower(c);
+  auto it = keyCenters_.find(c);
+  if (it != keyCenters_.end()) {
+    return it->second;
+  }
+  return Point(0, 0);
 }
 
 // ============================================================================
 // Dictionary Loading
 // ============================================================================
-bool Shark2Engine::loadDictionary(const std::string& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) {
-        return false;
+bool Shark2Engine::loadDictionary(const std::string &path) {
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    return false;
+  }
+
+  templates_.clear();
+  for (auto &row : buckets_) {
+    for (auto &bucket : row) {
+      bucket.clear();
+    }
+  }
+
+  std::string line;
+  uint32_t rank = 1;
+
+  while (std::getline(file, line)) {
+    // Trim whitespace
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' ||
+                             line.back() == ' ' || line.back() == '\t')) {
+      line.pop_back();
+    }
+    while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) {
+      line.erase(0, 1);
     }
 
-    templates_.clear();
-    for (auto& row : buckets_) {
-        for (auto& bucket : row) {
-            bucket.clear();
-        }
+    // Skip empty lines and lines with non-alpha characters
+    if (line.empty())
+      continue;
+
+    bool valid = true;
+    for (char c : line) {
+      if (!std::isalpha(c)) {
+        valid = false;
+        break;
+      }
+    }
+    if (!valid || line.length() < 2) {
+      rank++; // Still count for frequency
+      continue;
     }
 
-    std::string line;
-    uint32_t rank = 1;
-
-    while (std::getline(file, line)) {
-        // Trim whitespace
-        while (!line.empty() && (line.back() == '\r' || line.back() == '\n' ||
-                                  line.back() == ' ' || line.back() == '\t')) {
-            line.pop_back();
-        }
-        while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) {
-            line.erase(0, 1);
-        }
-
-        // Skip empty lines and lines with non-alpha characters
-        if (line.empty()) continue;
-
-        bool valid = true;
-        for (char c : line) {
-            if (!std::isalpha(c)) {
-                valid = false;
-                break;
-            }
-        }
-        if (!valid || line.length() < 2) {
-            rank++;  // Still count for frequency
-            continue;
-        }
-
-        // Convert to lowercase
-        std::string word;
-        for (char c : line) {
-            word += std::tolower(c);
-        }
-
-        // Generate template
-        GestureTemplate tmpl = generateTemplate(word, rank);
-        size_t idx = templates_.size();
-        templates_.push_back(std::move(tmpl));
-
-        // Add to bucket
-        int fi = word.front() - 'a';
-        int li = word.back() - 'a';
-        if (fi >= 0 && fi < 26 && li >= 0 && li < 26) {
-            buckets_[fi][li].push_back(idx);
-        }
-
-        rank++;
+    // Convert to lowercase
+    std::string word;
+    for (char c : line) {
+      word += std::tolower(c);
     }
 
-    return !templates_.empty();
+    // Generate template
+    GestureTemplate tmpl = generateTemplate(word, rank);
+    size_t idx = templates_.size();
+    templates_.push_back(std::move(tmpl));
+
+    // Add to bucket
+    int fi = word.front() - 'a';
+    int li = word.back() - 'a';
+    if (fi >= 0 && fi < 26 && li >= 0 && li < 26) {
+      buckets_[fi][li].push_back(idx);
+    }
+
+    rank++;
+  }
+
+  return !templates_.empty();
 }
 
 bool Shark2Engine::loadDictionaryWithFrequency(
-    const std::vector<std::pair<std::string, uint32_t>>& words) {
+    const std::vector<std::pair<std::string, uint32_t>> &words) {
 
-    templates_.clear();
-    for (auto& row : buckets_) {
-        for (auto& bucket : row) {
-            bucket.clear();
-        }
+  templates_.clear();
+  for (auto &row : buckets_) {
+    for (auto &bucket : row) {
+      bucket.clear();
+    }
+  }
+
+  for (const auto &[word, freq] : words) {
+    if (word.length() < 2)
+      continue;
+
+    // Validate all alpha
+    bool valid = true;
+    for (char c : word) {
+      if (!std::isalpha(c)) {
+        valid = false;
+        break;
+      }
+    }
+    if (!valid)
+      continue;
+
+    // Lowercase
+    std::string lword;
+    for (char c : word) {
+      lword += std::tolower(c);
     }
 
-    for (const auto& [word, freq] : words) {
-        if (word.length() < 2) continue;
+    GestureTemplate tmpl = generateTemplate(lword, freq);
+    size_t idx = templates_.size();
+    templates_.push_back(std::move(tmpl));
 
-        // Validate all alpha
-        bool valid = true;
-        for (char c : word) {
-            if (!std::isalpha(c)) {
-                valid = false;
-                break;
-            }
-        }
-        if (!valid) continue;
-
-        // Lowercase
-        std::string lword;
-        for (char c : word) {
-            lword += std::tolower(c);
-        }
-
-        GestureTemplate tmpl = generateTemplate(lword, freq);
-        size_t idx = templates_.size();
-        templates_.push_back(std::move(tmpl));
-
-        int fi = lword.front() - 'a';
-        int li = lword.back() - 'a';
-        if (fi >= 0 && fi < 26 && li >= 0 && li < 26) {
-            buckets_[fi][li].push_back(idx);
-        }
+    int fi = lword.front() - 'a';
+    int li = lword.back() - 'a';
+    if (fi >= 0 && fi < 26 && li >= 0 && li < 26) {
+      buckets_[fi][li].push_back(idx);
     }
+  }
 
-    return !templates_.empty();
+  return !templates_.empty();
 }
 
 // ============================================================================
 // Template Generation
 // ============================================================================
-GestureTemplate Shark2Engine::generateTemplate(const std::string& word, uint32_t freq) {
-    GestureTemplate tmpl;
-    tmpl.word = word;
-    tmpl.frequencyRank = freq;
-    tmpl.firstChar = word.front();
-    tmpl.lastChar = word.back();
+GestureTemplate Shark2Engine::generateTemplate(const std::string &word,
+                                               uint32_t freq) {
+  GestureTemplate tmpl;
+  tmpl.word = word;
+  tmpl.frequencyRank = freq;
+  tmpl.firstChar = word.front();
+  tmpl.lastChar = word.back();
 
-    // Generate raw points by connecting letter centers
-    for (char c : word) {
-        Point p = getKeyCenter(c);
-        if (p.x != 0 || p.y != 0) {  // Valid key
-            tmpl.rawPoints.push_back(p);
-        }
+  // Generate raw points by connecting letter centers
+  for (char c : word) {
+    Point p = getKeyCenter(c);
+    if (p.x != 0 || p.y != 0) { // Valid key
+      tmpl.rawPoints.push_back(p);
     }
+  }
 
-    if (tmpl.rawPoints.empty()) {
-        return tmpl;
-    }
-
-    tmpl.startPoint = tmpl.rawPoints.front();
-    tmpl.endPoint = tmpl.rawPoints.back();
-
-    // Uniform sampling
-    tmpl.sampledPoints = uniformSample(tmpl.rawPoints, config::SAMPLE_POINTS);
-
-    // Normalize for shape channel
-    tmpl.normalizedShape = normalizeShape(tmpl.sampledPoints);
-
+  if (tmpl.rawPoints.empty()) {
     return tmpl;
+  }
+
+  tmpl.startPoint = tmpl.rawPoints.front();
+  tmpl.endPoint = tmpl.rawPoints.back();
+
+  // Uniform sampling
+  tmpl.sampledPoints = uniformSample(tmpl.rawPoints, config::SAMPLE_POINTS);
+
+  // Normalize for shape channel
+  tmpl.normalizedShape = normalizeShape(tmpl.sampledPoints);
+
+  return tmpl;
 }
 
 // ============================================================================
 // Path Utilities
 // ============================================================================
-double Shark2Engine::pathLength(const std::vector<Point>& points) {
-    if (points.size() < 2) return 0;
+double Shark2Engine::pathLength(const std::vector<Point> &points) {
+  if (points.size() < 2)
+    return 0;
 
-    double len = 0;
-    for (size_t i = 1; i < points.size(); i++) {
-        len += points[i - 1].distance(points[i]);
-    }
-    return len;
+  double len = 0;
+  for (size_t i = 1; i < points.size(); i++) {
+    len += points[i - 1].distance(points[i]);
+  }
+  return len;
 }
 
-Point Shark2Engine::centroid(const std::vector<Point>& points) {
-    if (points.empty()) return Point(0, 0);
+Point Shark2Engine::centroid(const std::vector<Point> &points) {
+  if (points.empty())
+    return Point(0, 0);
 
-    double sumX = 0, sumY = 0;
-    for (const auto& p : points) {
-        sumX += p.x;
-        sumY += p.y;
-    }
-    return Point(sumX / points.size(), sumY / points.size());
+  double sumX = 0, sumY = 0;
+  for (const auto &p : points) {
+    sumX += p.x;
+    sumY += p.y;
+  }
+  return Point(sumX / points.size(), sumY / points.size());
 }
 
 // ============================================================================
 // Uniform Sampling (SHARK2 Stage 1)
 // ============================================================================
-std::vector<Point> Shark2Engine::uniformSample(const std::vector<Point>& points, int n) {
-    if (points.empty()) return {};
-    if (points.size() == 1) {
-        return std::vector<Point>(n, points[0]);
+std::vector<Point> Shark2Engine::uniformSample(const std::vector<Point> &points,
+                                               int n) {
+  if (points.empty())
+    return {};
+  if (points.size() == 1) {
+    return std::vector<Point>(n, points[0]);
+  }
+
+  std::vector<Point> result;
+  result.reserve(n);
+
+  double totalLen = pathLength(points);
+  if (totalLen < 1e-9) {
+    // All points same location
+    return std::vector<Point>(n, points[0]);
+  }
+
+  double interval = totalLen / (n - 1);
+  double accumulated = 0;
+
+  result.push_back(points[0]);
+  size_t j = 1;
+
+  for (size_t i = 1;
+       i < points.size() && result.size() < static_cast<size_t>(n); i++) {
+    double segLen = points[i - 1].distance(points[i]);
+
+    while (accumulated + segLen >= interval * j &&
+           result.size() < static_cast<size_t>(n)) {
+      double t = (interval * j - accumulated) / segLen;
+      t = std::max(0.0, std::min(1.0, t));
+
+      Point interp;
+      interp.x = points[i - 1].x + t * (points[i].x - points[i - 1].x);
+      interp.y = points[i - 1].y + t * (points[i].y - points[i - 1].y);
+      result.push_back(interp);
+      j++;
     }
+    accumulated += segLen;
+  }
 
-    std::vector<Point> result;
-    result.reserve(n);
+  // Ensure we have exactly n points
+  while (result.size() < static_cast<size_t>(n)) {
+    result.push_back(points.back());
+  }
 
-    double totalLen = pathLength(points);
-    if (totalLen < 1e-9) {
-        // All points same location
-        return std::vector<Point>(n, points[0]);
-    }
-
-    double interval = totalLen / (n - 1);
-    double accumulated = 0;
-
-    result.push_back(points[0]);
-    size_t j = 1;
-
-    for (size_t i = 1; i < points.size() && result.size() < static_cast<size_t>(n); i++) {
-        double segLen = points[i - 1].distance(points[i]);
-
-        while (accumulated + segLen >= interval * j && result.size() < static_cast<size_t>(n)) {
-            double t = (interval * j - accumulated) / segLen;
-            t = std::max(0.0, std::min(1.0, t));
-
-            Point interp;
-            interp.x = points[i - 1].x + t * (points[i].x - points[i - 1].x);
-            interp.y = points[i - 1].y + t * (points[i].y - points[i - 1].y);
-            result.push_back(interp);
-            j++;
-        }
-        accumulated += segLen;
-    }
-
-    // Ensure we have exactly n points
-    while (result.size() < static_cast<size_t>(n)) {
-        result.push_back(points.back());
-    }
-
-    return result;
+  return result;
 }
 
 // ============================================================================
 // Shape Normalization (SHARK2 Shape Channel)
 // ============================================================================
-std::vector<Point> Shark2Engine::normalizeShape(const std::vector<Point>& points) {
-    if (points.empty()) return {};
+std::vector<Point>
+Shark2Engine::normalizeShape(const std::vector<Point> &points) {
+  if (points.empty())
+    return {};
 
-    // 1. Translate centroid to origin
-    Point c = centroid(points);
-    std::vector<Point> centered;
-    centered.reserve(points.size());
-    for (const auto& p : points) {
-        centered.push_back(p - c);
-    }
+  // 1. Translate centroid to origin
+  Point c = centroid(points);
+  std::vector<Point> centered;
+  centered.reserve(points.size());
+  for (const auto &p : points) {
+    centered.push_back(p - c);
+  }
 
-    // 2. Scale to unit size (using bounding box diagonal or path length)
-    double maxDist = 0;
-    for (const auto& p : centered) {
-        double d = std::sqrt(p.x * p.x + p.y * p.y);
-        maxDist = std::max(maxDist, d);
-    }
+  // 2. Scale to unit size (using bounding box diagonal or path length)
+  double maxDist = 0;
+  for (const auto &p : centered) {
+    double d = std::sqrt(p.x * p.x + p.y * p.y);
+    maxDist = std::max(maxDist, d);
+  }
 
-    if (maxDist < 1e-9) {
-        return centered;  // Degenerate case
-    }
+  if (maxDist < 1e-9) {
+    return centered; // Degenerate case
+  }
 
-    std::vector<Point> normalized;
-    normalized.reserve(centered.size());
-    for (const auto& p : centered) {
-        normalized.push_back(p / maxDist);
-    }
+  std::vector<Point> normalized;
+  normalized.reserve(centered.size());
+  for (const auto &p : centered) {
+    normalized.push_back(p / maxDist);
+  }
 
-    return normalized;
+  return normalized;
 }
 
 // ============================================================================
 // Distance Metrics
 // ============================================================================
-double Shark2Engine::shapeDistance(const std::vector<Point>& a, const std::vector<Point>& b) {
-    if (a.size() != b.size() || a.empty()) {
-        return std::numeric_limits<double>::max();
-    }
+double Shark2Engine::shapeDistance(const std::vector<Point> &a,
+                                   const std::vector<Point> &b) {
+  if (a.size() != b.size() || a.empty()) {
+    return std::numeric_limits<double>::max();
+  }
 
-    // Average Euclidean distance between corresponding points
-    double sum = 0;
-    for (size_t i = 0; i < a.size(); i++) {
-        sum += a[i].distance(b[i]);
-    }
-    return sum / a.size();
+  // Average Euclidean distance between corresponding points
+  double sum = 0;
+  for (size_t i = 0; i < a.size(); i++) {
+    sum += a[i].distance(b[i]);
+  }
+  return sum / a.size();
 }
 
-double Shark2Engine::locationDistance(const std::vector<Point>& a, const std::vector<Point>& b) {
-    if (a.size() != b.size() || a.empty()) {
-        return std::numeric_limits<double>::max();
-    }
+double Shark2Engine::locationDistance(const std::vector<Point> &a,
+                                      const std::vector<Point> &b) {
+  if (a.size() != b.size() || a.empty()) {
+    return std::numeric_limits<double>::max();
+  }
 
-    // Average Euclidean distance (non-normalized)
-    double sum = 0;
-    for (size_t i = 0; i < a.size(); i++) {
-        sum += a[i].distance(b[i]);
-    }
-    return sum / a.size();
+  // Average Euclidean distance (non-normalized)
+  double sum = 0;
+  for (size_t i = 0; i < a.size(); i++) {
+    sum += a[i].distance(b[i]);
+  }
+  return sum / a.size();
 }
 
 // ============================================================================
 // Pruning (SHARK2 Stage 2)
 // ============================================================================
-std::vector<size_t> Shark2Engine::pruneByStartEnd(const Point& start, const Point& end, int inputLen) {
-    std::vector<size_t> candidates;
+std::vector<size_t> Shark2Engine::pruneByStartEnd(const Point &start,
+                                                  const Point &end,
+                                                  int inputLen) {
+  std::vector<size_t> candidates;
 
-    // Find keys near start and end points
-    std::vector<char> startKeys;
-    std::vector<char> endKeys;
+  // Find keys near start and end points
+  std::vector<char> startKeys;
+  std::vector<char> endKeys;
 
-    for (const auto& [c, center] : keyCenters_) {
-        if (start.distance(center) <= config::PRUNING_RADIUS) {
-            startKeys.push_back(c);
-        }
-        if (end.distance(center) <= config::PRUNING_RADIUS) {
-            endKeys.push_back(c);
-        }
+  for (const auto &[c, center] : keyCenters_) {
+    if (start.distance(center) <= config::PRUNING_RADIUS) {
+      startKeys.push_back(c);
     }
-
-    // If no keys found near start/end, be more lenient
-    if (startKeys.empty()) {
-        double minDist = std::numeric_limits<double>::max();
-        char closest = 'a';
-        for (const auto& [c, center] : keyCenters_) {
-            double d = start.distance(center);
-            if (d < minDist) {
-                minDist = d;
-                closest = c;
-            }
-        }
-        startKeys.push_back(closest);
+    if (end.distance(center) <= config::PRUNING_RADIUS) {
+      endKeys.push_back(c);
     }
+  }
 
-    if (endKeys.empty()) {
-        double minDist = std::numeric_limits<double>::max();
-        char closest = 'a';
-        for (const auto& [c, center] : keyCenters_) {
-            double d = end.distance(center);
-            if (d < minDist) {
-                minDist = d;
-                closest = c;
-            }
-        }
-        endKeys.push_back(closest);
+  // If no keys found near start/end, be more lenient
+  if (startKeys.empty()) {
+    double minDist = std::numeric_limits<double>::max();
+    char closest = 'a';
+    for (const auto &[c, center] : keyCenters_) {
+      double d = start.distance(center);
+      if (d < minDist) {
+        minDist = d;
+        closest = c;
+      }
     }
+    startKeys.push_back(closest);
+  }
 
-    // Collect templates from matching buckets
-    std::vector<bool> seen(templates_.size(), false);
-
-    for (char sc : startKeys) {
-        int fi = sc - 'a';
-        if (fi < 0 || fi >= 26) continue;
-
-        for (char ec : endKeys) {
-            int li = ec - 'a';
-            if (li < 0 || li >= 26) continue;
-
-            for (size_t idx : buckets_[fi][li]) {
-                if (seen[idx]) continue;
-
-                const auto& tmpl = templates_[idx];
-                int lenDiff = std::abs(static_cast<int>(tmpl.word.length()) - inputLen);
-                if (lenDiff <= config::LENGTH_TOLERANCE) {
-                    candidates.push_back(idx);
-                    seen[idx] = true;
-                }
-            }
-        }
+  if (endKeys.empty()) {
+    double minDist = std::numeric_limits<double>::max();
+    char closest = 'a';
+    for (const auto &[c, center] : keyCenters_) {
+      double d = end.distance(center);
+      if (d < minDist) {
+        minDist = d;
+        closest = c;
+      }
     }
+    endKeys.push_back(closest);
+  }
 
-    return candidates;
+  // Collect templates from matching buckets
+  std::vector<bool> seen(templates_.size(), false);
+
+  for (char sc : startKeys) {
+    int fi = sc - 'a';
+    if (fi < 0 || fi >= 26)
+      continue;
+
+    for (char ec : endKeys) {
+      int li = ec - 'a';
+      if (li < 0 || li >= 26)
+        continue;
+
+      for (size_t idx : buckets_[fi][li]) {
+        if (seen[idx])
+          continue;
+
+        const auto &tmpl = templates_[idx];
+        int lenDiff = std::abs(static_cast<int>(tmpl.word.length()) - inputLen);
+        if (lenDiff <= config::LENGTH_TOLERANCE) {
+          candidates.push_back(idx);
+          seen[idx] = true;
+        }
+      }
+    }
+  }
+
+  return candidates;
 }
 
 // ============================================================================
 // Frequency Score
 // ============================================================================
 double Shark2Engine::frequencyToScore(uint32_t rank) {
-    // Log scale: rank 1 -> high score, rank 10000 -> low score
-    if (rank == 0) rank = 1;
-    return 1.0 / std::log2(rank + 1);
+  // Log scale: rank 1 -> high score, rank 10000 -> low score
+  if (rank == 0)
+    rank = 1;
+  return 1.0 / std::log2(rank + 1);
 }
 
 // ============================================================================
 // Main Recognition (SHARK2 Integration)
 // ============================================================================
-std::vector<Candidate> Shark2Engine::recognize(
-    const std::vector<Point>& inputPoints,
-    int maxCandidates) {
+std::vector<Candidate>
+Shark2Engine::recognize(const std::vector<Point> &inputPoints,
+                        int maxCandidates) {
 
-    if (inputPoints.size() < 2 || templates_.empty()) {
-        return {};
-    }
+  if (inputPoints.size() < 2 || templates_.empty()) {
+    return {};
+  }
 
-    // Estimate input word length from gesture
-    // Rough heuristic: count direction changes or use path length
-    int estimatedLen = std::max(2, static_cast<int>(inputPoints.size() / 10));
+  // Estimate input word length from gesture
+  // Rough heuristic: count direction changes or use path length
+  int estimatedLen = std::max(2, static_cast<int>(inputPoints.size() / 10));
 
-    // Stage 1: Uniform sampling
-    std::vector<Point> sampled = uniformSample(inputPoints, config::SAMPLE_POINTS);
+  // Stage 1: Uniform sampling
+  std::vector<Point> sampled =
+      uniformSample(inputPoints, config::SAMPLE_POINTS);
 
-    // Normalize for shape channel
-    std::vector<Point> normalizedInput = normalizeShape(sampled);
+  // Normalize for shape channel
+  std::vector<Point> normalizedInput = normalizeShape(sampled);
 
-    // Stage 2: Prune by start/end
-    Point start = inputPoints.front();
-    Point end = inputPoints.back();
-    std::vector<size_t> candidateIndices = pruneByStartEnd(start, end, estimatedLen);
+  // Stage 2: Prune by start/end
+  Point start = inputPoints.front();
+  Point end = inputPoints.back();
+  std::vector<size_t> candidateIndices =
+      pruneByStartEnd(start, end, estimatedLen);
 
-    // If pruning is too aggressive, expand search
-    if (candidateIndices.size() < 10) {
-        // Also try with doubled radius or all templates for short words
-        estimatedLen = std::max(2, estimatedLen - 1);
-        candidateIndices = pruneByStartEnd(start, end, estimatedLen);
-    }
+  // If pruning is too aggressive, expand search
+  if (candidateIndices.size() < 10) {
+    // Also try with doubled radius or all templates for short words
+    estimatedLen = std::max(2, estimatedLen - 1);
+    candidateIndices = pruneByStartEnd(start, end, estimatedLen);
+  }
 
-    // Stage 3 & 4: Compute distances
-    std::vector<Candidate> results;
-    results.reserve(candidateIndices.size());
+  // Stage 3 & 4: Compute distances
+  std::vector<Candidate> results;
+  results.reserve(candidateIndices.size());
 
-    for (size_t idx : candidateIndices) {
-        const auto& tmpl = templates_[idx];
-        if (tmpl.normalizedShape.empty()) continue;
+  for (size_t idx : candidateIndices) {
+    const auto &tmpl = templates_[idx];
+    if (tmpl.normalizedShape.empty())
+      continue;
 
-        Candidate cand;
-        cand.word = tmpl.word;
+    Candidate cand;
+    cand.word = tmpl.word;
 
-        // Shape channel distance
-        cand.shapeDistance = shapeDistance(normalizedInput, tmpl.normalizedShape);
+    // Shape channel distance
+    cand.shapeDistance = shapeDistance(normalizedInput, tmpl.normalizedShape);
 
-        // Location channel distance
-        cand.locationDistance = locationDistance(sampled, tmpl.sampledPoints);
+    // Location channel distance
+    cand.locationDistance = locationDistance(sampled, tmpl.sampledPoints);
 
-        // Frequency score
-        cand.frequencyScore = frequencyToScore(tmpl.frequencyRank);
+    // Frequency score
+    cand.frequencyScore = frequencyToScore(tmpl.frequencyRank);
 
-        // Combine scores (lower distance = better, higher freq = better)
-        // Convert distances to similarity scores
-        double shapeScore = 1.0 / (1.0 + cand.shapeDistance * 10);
-        double locationScore = 1.0 / (1.0 + cand.locationDistance / 50.0);
+    // Combine scores (lower distance = better, higher freq = better)
+    // Convert distances to similarity scores
+    double shapeScore = 1.0 / (1.0 + cand.shapeDistance * 10);
+    double locationScore = 1.0 / (1.0 + cand.locationDistance / 50.0);
 
-        cand.score = config::SHAPE_WEIGHT * shapeScore +
-                     config::LOCATION_WEIGHT * locationScore +
-                     config::FREQUENCY_WEIGHT * cand.frequencyScore;
+    cand.score = config::SHAPE_WEIGHT * shapeScore +
+                 config::LOCATION_WEIGHT * locationScore +
+                 config::FREQUENCY_WEIGHT * cand.frequencyScore;
 
-        results.push_back(cand);
-    }
+    results.push_back(cand);
+  }
 
-    // Sort by score (descending)
-    std::sort(results.begin(), results.end(),
-              [](const Candidate& a, const Candidate& b) {
-                  return a.score > b.score;
-              });
+  // Sort by score (descending)
+  std::sort(
+      results.begin(), results.end(),
+      [](const Candidate &a, const Candidate &b) { return a.score > b.score; });
 
-    // Return top N
-    if (results.size() > static_cast<size_t>(maxCandidates)) {
-        results.resize(maxCandidates);
-    }
+  // Return top N
+  if (results.size() > static_cast<size_t>(maxCandidates)) {
+    results.resize(maxCandidates);
+  }
 
-    return results;
+  return results;
 }
 
 // Alternative API
-std::vector<std::pair<std::string, float>> Shark2Engine::recognize(
-    const std::vector<std::pair<float, float>>& points,
-    int maxCandidates) {
+std::vector<std::pair<std::string, float>>
+Shark2Engine::recognize(const std::vector<std::pair<float, float>> &points,
+                        int maxCandidates) {
 
-    std::vector<Point> pts;
-    pts.reserve(points.size());
-    for (const auto& [x, y] : points) {
-        pts.emplace_back(x, y);
-    }
+  std::vector<Point> pts;
+  pts.reserve(points.size());
+  for (const auto &[x, y] : points) {
+    pts.emplace_back(x, y);
+  }
 
-    auto candidates = recognize(pts, maxCandidates);
+  auto candidates = recognize(pts, maxCandidates);
 
-    std::vector<std::pair<std::string, float>> result;
-    result.reserve(candidates.size());
-    for (const auto& c : candidates) {
-        result.emplace_back(c.word, static_cast<float>(c.score));
-    }
-    return result;
+  std::vector<std::pair<std::string, float>> result;
+  result.reserve(candidates.size());
+  for (const auto &c : candidates) {
+    result.emplace_back(c.word, static_cast<float>(c.score));
+  }
+  return result;
 }
 
 } // namespace shark2
