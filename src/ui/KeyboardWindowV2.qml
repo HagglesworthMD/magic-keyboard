@@ -17,11 +17,10 @@ import QtQuick.Layouts
 Window {
     id: keyboard
 
-    // Steam Deck optimized dimensions (base values, affected by scale)
-    readonly property real baseWidth: 1200
-    readonly property real baseHeight: 320
-    width: baseWidth * bridge.windowScale
-    height: baseHeight * bridge.windowScale
+    // Window dimensions computed from grid system
+    // These will update automatically when scaleFactor changes
+    width: 720 * scaleFactor
+    height: 240 * scaleFactor
     visible: false
     color: "transparent"  // Allow opacity control
     title: "Magic Keyboard"
@@ -33,19 +32,27 @@ Window {
     // GEOMETRY MODEL
     // ═══════════════════════════════════════════════════════════════════
     
-    // Scale factor for different displays
+    // Scale factor combines DPI scaling with user preference
+    // Window size is controlled by baseWidth/Height * windowScale
+    // Internal key dimensions scale proportionally
     readonly property real scaleFactor: {
-        if (Screen.width <= 1280) return 1.0;       // Steam Deck native
-        if (Screen.width <= 1920) return 1.15;      // 1080p
-        return Math.min(1.4, Screen.width / 1280);  // Cap scaling
+        // Base DPI factor
+        let dpi = 1.0;
+        if (Screen.width <= 1280) dpi = 1.0;       // Steam Deck native
+        else if (Screen.width <= 1920) dpi = 1.15; // 1080p
+        else dpi = Math.min(1.4, Screen.width / 1280);
+        
+        // Apply user scale preference
+        return dpi * bridge.windowScale;
     }
     
-    // Grid unit system
-    readonly property real gridUnit: 64 * scaleFactor       // Base unit (1u)
-    readonly property real keyHeight: 52 * scaleFactor      // Key visual height
-    readonly property real keyGap: 8 * scaleFactor          // Gap between keys
+    // Grid unit system - scaled to fill window proportionally
+    // These are the base values at scale 1.0, scaled by scaleFactor
+    readonly property real gridUnit: 52 * scaleFactor       // Base unit (1u)
+    readonly property real keyHeight: 42 * scaleFactor      // Key visual height
+    readonly property real keyGap: 6 * scaleFactor          // Gap between keys
     readonly property real hitPadding: 4                     // Extended hit zone
-    readonly property real cornerRadius: 10 * scaleFactor   // Key corner radius
+    readonly property real cornerRadius: 8 * scaleFactor    // Key corner radius
     readonly property real rowHeight: keyHeight + keyGap    // Total row height
     
     // ═══════════════════════════════════════════════════════════════════
@@ -168,20 +175,39 @@ Window {
     }
     
     function getKeyAt(x, y) {
-        // Map to keys container coordinates
-        let mapped = keyboard.mapToItem(keysContainer, x, y);
-        let item = keysContainer.childAt(mapped.x, mapped.y);
-        
-        // Traverse up to find KeyBtn
-        while (item && !item.isKeyBtn) {
-            item = item.parent;
+        // Recursive search through children to find KeyBtn at position
+        function findKeyRecursive(parent, px, py) {
+            if (!parent || !parent.children) return null;
+            
+            for (let i = 0; i < parent.children.length; i++) {
+                let child = parent.children[i];
+                
+                // Check if this is a KeyBtn
+                if (child.isKeyBtn) {
+                    // Map point to child coordinates
+                    let localPt = child.mapFromItem(masterMouse, px, py);
+                    if (localPt.x >= 0 && localPt.x < child.width &&
+                        localPt.y >= 0 && localPt.y < child.height) {
+                        return child;
+                    }
+                }
+                
+                // Recursively search children
+                let found = findKeyRecursive(child, px, py);
+                if (found) return found;
+            }
+            return null;
         }
-        return (item && item.isKeyBtn) ? item : null;
+        
+        return findKeyRecursive(keysContainer, x, y);
     }
     
     function commitKey(key) {
         if (key.code === "shift") {
             shiftActive = !shiftActive;
+        } else if (key.action) {
+            // Action keys route through sendAction (copy, paste, cut, selectall)
+            bridge.sendAction(key.code);
         } else {
             sendKey(key.code);
         }
@@ -425,6 +451,64 @@ Window {
                     bridge.windowScale + (dx + dy) / 400));
 
                 bridge.updateSetting("window_scale", newScale);
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // DRAG HANDLE (for moving window)
+    // ═══════════════════════════════════════════════════════════════════
+
+    Rectangle {
+        id: dragHandle
+        height: 24 * keyboard.scaleFactor
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.leftMargin: 50 * keyboard.scaleFactor  // Leave room for settings button
+        anchors.rightMargin: 50 * keyboard.scaleFactor // Leave room for close button
+        anchors.topMargin: 4
+        color: dragArea.containsMouse ? Qt.rgba(1, 1, 1, 0.1) : "transparent"
+        radius: 6 * keyboard.scaleFactor
+        z: 150
+
+        // Grip indicator (horizontal lines)
+        Column {
+            anchors.centerIn: parent
+            spacing: 3 * keyboard.scaleFactor
+            
+            Repeater {
+                model: 3
+                Rectangle {
+                    width: 40 * keyboard.scaleFactor
+                    height: 2 * keyboard.scaleFactor
+                    radius: 1
+                    color: dragArea.containsMouse ? "#88c0d0" : "#4a4a6a"
+                    opacity: dragArea.containsMouse ? 0.8 : 0.4
+                }
+            }
+        }
+
+        MouseArea {
+            id: dragArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.SizeAllCursor
+
+            property point lastPos
+
+            onPressed: (mouse) => {
+                lastPos = Qt.point(mouse.x, mouse.y);
+            }
+
+            onPositionChanged: (mouse) => {
+                if (!pressed) return;
+                
+                var dx = mouse.x - lastPos.x;
+                var dy = mouse.y - lastPos.y;
+                
+                keyboard.x += dx;
+                keyboard.y += dy;
             }
         }
     }

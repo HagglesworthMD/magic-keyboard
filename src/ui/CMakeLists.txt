@@ -16,7 +16,7 @@ qt_add_qml_module(magickeyboard-ui
     URI MagicKeyboard
     VERSION 1.0
     QML_FILES
-        KeyboardWindow.qml
+        KeyboardWindowV2.qml
     OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/MagicKeyboard
 )
 

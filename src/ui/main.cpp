@@ -870,7 +870,7 @@ int main(int argc, char *argv[]) {
   QQmlApplicationEngine engine;
   engine.rootContext()->setContextProperty("bridge", &bridge);
 
-  const QUrl url(QStringLiteral("qrc:/MagicKeyboard/KeyboardWindow.qml"));
+  const QUrl url(QStringLiteral("qrc:/MagicKeyboard/KeyboardWindowV2.qml"));
 
   QObject::connect(
       &engine, &QQmlApplicationEngine::objectCreated, &app,
