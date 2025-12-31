@@ -659,10 +659,16 @@ private slots:
           QJsonValue vcands = obj.value("candidates");
           if (vcands.isArray()) {
             for (const auto &v : vcands.toArray()) {
-              if (v.isObject())
-                words << v.toObject().value("w").toString();
-              else if (v.isString())
+              if (v.isObject()) {
+                // Try "word" first (new format), then "w" (legacy)
+                QString word = v.toObject().value("word").toString();
+                if (word.isEmpty())
+                  word = v.toObject().value("w").toString();
+                if (!word.isEmpty())
+                  words << word;
+              } else if (v.isString()) {
                 words << v.toString();
+              }
             }
           } else {
             // Legacy fallback
@@ -673,8 +679,9 @@ private slots:
               if (arrEnd > arrStart) {
                 QString content = msg.mid(arrStart, arrEnd - arrStart);
                 int wPos = 0;
-                while ((wPos = content.indexOf("\"w\":\"", wPos)) >= 0) {
-                  int wStart = wPos + 5;
+                // Look for "word" first (new format)
+                while ((wPos = content.indexOf("\"word\":\"", wPos)) >= 0) {
+                  int wStart = wPos + 8;
                   int wEnd = content.indexOf("\"", wStart);
                   if (wEnd > wStart)
                     words << content.mid(wStart, wEnd - wStart);

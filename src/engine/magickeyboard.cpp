@@ -1329,6 +1329,7 @@ void MagicKeyboardEngine::processLine(const std::string &line, int clientFd) {
           msgCand += ",";
       }
       msgCand += "]}\n";
+      MKLOG(Info) << "Sending candidates to UI: " << msgCand.substr(0, 100);
       sendToUI(msgCand);
 
       // Store candidates in engine for selection
