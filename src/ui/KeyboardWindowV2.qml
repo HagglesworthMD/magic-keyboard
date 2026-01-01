@@ -879,6 +879,39 @@ Window {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // HIDE BUTTON (top-right corner)
+    // ═══════════════════════════════════════════════════════════════════
+
+    Rectangle {
+        id: hideButton
+        width: 32 * keyboard.scaleFactor
+        height: 32 * keyboard.scaleFactor
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: 8
+        color: hideButtonArea.containsMouse ? "#5a3a3a" : "#3a2a2a"
+        radius: 6
+        border.color: hideButtonArea.containsMouse ? "#d08888" : "#6a4a4a"
+        border.width: 1
+        z: 300
+
+        Text {
+            anchors.centerIn: parent
+            text: "✕"
+            color: hideButtonArea.containsMouse ? "#ff9999" : "#d08888"
+            font.pixelSize: 16 * keyboard.scaleFactor
+            font.bold: true
+        }
+
+        MouseArea {
+            id: hideButtonArea
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: bridge.toggleVisibility()
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // SETTINGS PANEL
     // ═══════════════════════════════════════════════════════════════════
 
