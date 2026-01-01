@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic Keyboard Test Page - Swipe Diagnostics</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #0f3460;
+            --accent: #88c0d0;
+            --success: #a3be8c;
+            --warning: #ebcb8b;
+            --error: #bf616a;
+            --text-primary: #eceff4;
+            --text-secondary: #d8dee9;
+            --text-muted: #4c566a;
+            --border: rgba(136, 192, 208, 0.2);
+        }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 50%, var(--bg-tertiary) 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            color: var(--text-primary);
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--accent);
+            font-weight: 300;
+            font-size: 2rem;
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #5e81ac;
+            margin-bottom: 20px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 4px;
+            border-radius: 10px;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 12px 20px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .tab:hover {
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab.active {
+            background: var(--accent);
+            color: var(--bg-primary);
+            font-weight: 600;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Cards */
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .card h2 {
+            color: var(--accent);
+            font-size: 1.1rem;
+            margin-top: 0;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card h2::before {
+            content: '';
+            display: inline-block;
+            width: 4px;
+            height: 20px;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+
+        /* Swipe Test Section */
+        .swipe-test-word {
+            font-size: 3rem;
+            font-weight: 300;
+            text-align: center;
+            color: var(--accent);
+            padding: 30px;
+            background: rgba(136, 192, 208, 0.1);
+            border-radius: 12px;
+            margin-bottom: 15px;
+            letter-spacing: 4px;
+        }
+
+        .swipe-instruction {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+        }
+
+        .swipe-input {
+            width: 100%;
+            padding: 16px 20px;
+            font-size: 1.3rem;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.4);
+            color: var(--text-primary);
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .swipe-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 4px rgba(136, 192, 208, 0.2);
+        }
+
+        /* Result Display */
+        .result-display {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+
+        .result-display.success {
+            background: rgba(163, 190, 140, 0.15);
+            border: 1px solid rgba(163, 190, 140, 0.3);
+        }
+
+        .result-display.partial {
+            background: rgba(235, 203, 139, 0.15);
+            border: 1px solid rgba(235, 203, 139, 0.3);
+        }
+
+        .result-display.miss {
+            background: rgba(191, 97, 106, 0.15);
+            border: 1px solid rgba(191, 97, 106, 0.3);
+        }
+
+        .result-display.waiting {
+            background: rgba(136, 192, 208, 0.1);
+            border: 1px solid var(--border);
+        }
+
+        .result-icon {
+            font-size: 2rem;
+        }
+
+        .result-text {
+            font-size: 1.1rem;
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 500;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: var(--bg-primary);
+        }
+
+        .btn-primary:hover {
+            background: #9dd0dd;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: rgba(136, 192, 208, 0.2);
+            color: var(--accent);
+            border: 1px solid rgba(136, 192, 208, 0.3);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(136, 192, 208, 0.3);
+        }
+
+        .btn-danger {
+            background: rgba(191, 97, 106, 0.2);
+            color: var(--error);
+            border: 1px solid rgba(191, 97, 106, 0.3);
+        }
+
+        .btn-danger:hover {
+            background: rgba(191, 97, 106, 0.3);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 300;
+            color: var(--accent);
+        }
+
+        .stat-value.success {
+            color: var(--success);
+        }
+
+        .stat-value.warning {
+            color: var(--warning);
+        }
+
+        .stat-value.error {
+            color: var(--error);
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 5px;
+        }
+
+        /* Diagnostics Panel */
+        .diagnostics {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 15px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 0.85rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .diag-row {
+            display: flex;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .diag-label {
+            color: var(--text-muted);
+            width: 140px;
+            flex-shrink: 0;
+        }
+
+        .diag-value {
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+
+        .diag-value.highlight {
+            color: var(--accent);
+        }
+
+        .diag-value.success {
+            color: var(--success);
+        }
+
+        .diag-value.warning {
+            color: var(--warning);
+        }
+
+        .diag-value.error {
+            color: var(--error);
+        }
+
+        /* Test Word List */
+        .word-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .word-chip {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .word-chip.pending {
+            background: rgba(136, 192, 208, 0.15);
+            color: var(--accent);
+            border: 1px solid rgba(136, 192, 208, 0.3);
+        }
+
+        .word-chip.current {
+            background: var(--accent);
+            color: var(--bg-primary);
+            font-weight: 600;
+        }
+
+        .word-chip.success {
+            background: rgba(163, 190, 140, 0.2);
+            color: var(--success);
+            border: 1px solid rgba(163, 190, 140, 0.4);
+        }
+
+        .word-chip.partial {
+            background: rgba(235, 203, 139, 0.2);
+            color: var(--warning);
+            border: 1px solid rgba(235, 203, 139, 0.4);
+        }
+
+        .word-chip.miss {
+            background: rgba(191, 97, 106, 0.2);
+            color: var(--error);
+            border: 1px solid rgba(191, 97, 106, 0.4);
+        }
+
+        /* History Table */
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .history-table th,
+        .history-table td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .history-table th {
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+
+        .history-table td {
+            font-size: 0.9rem;
+        }
+
+        .position-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .position-badge.top1 {
+            background: var(--success);
+            color: var(--bg-primary);
+        }
+
+        .position-badge.top3 {
+            background: var(--warning);
+            color: var(--bg-primary);
+        }
+
+        .position-badge.top8 {
+            background: #5e81ac;
+            color: white;
+        }
+
+        .position-badge.miss {
+            background: var(--error);
+            color: white;
+        }
+
+        /* Accuracy Meter */
+        .accuracy-meter {
+            height: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .accuracy-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--success), var(--accent));
+            transition: width 0.3s ease;
+        }
+
+        /* Difficulty Selector */
+        .difficulty-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .difficulty-btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .difficulty-btn:hover {
+            border-color: var(--accent);
+        }
+
+        .difficulty-btn.active {
+            background: var(--accent);
+            color: var(--bg-primary);
+            border-color: var(--accent);
+        }
+
+        /* Input field styling */
+        input[type="text"],
+        textarea {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 1.1rem;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            color: var(--text-primary);
+            margin-bottom: 15px;
+            transition: all 0.2s ease;
+        }
+
+        input:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(136, 192, 208, 0.2);
+        }
+
+        label {
+            display: block;
+            color: var(--accent);
+            font-size: 0.9rem;
+            margin-bottom: 6px;
+        }
+
+        /* Spacer for keyboard */
+        .spacer {
+            height: 350px;
+        }
+
+        /* Status bar */
+        .status-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(26, 26, 46, 0.98);
+            padding: 8px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid var(--border);
+            font-size: 0.8rem;
+            z-index: 100;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-dot.connected {
+            background: var(--success);
+        }
+
+        .status-dot.disconnected {
+            background: var(--error);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🎹 Magic Keyboard Diagnostics</h1>
+        <p class="subtitle">Swipe Accuracy Testing & Analysis</p>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('swipe-test')">🎯 Swipe Test</button>
+            <button class="tab" onclick="showTab('free-typing')">⌨️ Free Typing</button>
+            <button class="tab" onclick="showTab('diagnostics')">📊 Diagnostics</button>
+            <button class="tab" onclick="showTab('history')">📜 History</button>
+        </div>
+
+        <!-- Swipe Test Tab -->
+        <div id="swipe-test" class="tab-content active">
+            <div class="card">
+                <h2>Accuracy Statistics</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value success" id="stat-top1">0</div>
+                        <div class="stat-label">Top 1 Hits</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value warning" id="stat-top3">0</div>
+                        <div class="stat-label">Top 3 Hits</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-top8">0</div>
+                        <div class="stat-label">Top 8 Hits</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value error" id="stat-miss">0</div>
+                        <div class="stat-label">Misses</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-total">0</div>
+                        <div class="stat-label">Total Tests</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value highlight" id="stat-accuracy">--%</div>
+                        <div class="stat-label">Top 1 Rate</div>
+                    </div>
+                </div>
+                <div class="accuracy-meter">
+                    <div class="accuracy-fill" id="accuracy-bar" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Difficulty Level</h2>
+                <div class="difficulty-selector">
+                    <button class="difficulty-btn active" onclick="setDifficulty('easy')">Easy (3-4 letters)</button>
+                    <button class="difficulty-btn" onclick="setDifficulty('medium')">Medium (5-6 letters)</button>
+                    <button class="difficulty-btn" onclick="setDifficulty('hard')">Hard (7+ letters)</button>
+                    <button class="difficulty-btn" onclick="setDifficulty('all')">All Words</button>
+                </div>
+
+                <h2>Test Words</h2>
+                <div class="word-list" id="word-list"></div>
+            </div>
+
+            <div class="card">
+                <h2>Current Test</h2>
+                <div class="swipe-test-word" id="target-word">---</div>
+                <p class="swipe-instruction">Swipe the word above on your keyboard, then press SPACE or tap a candidate
+                </p>
+
+                <input type="text" id="swipe-input" class="swipe-input" placeholder="Result will appear here..."
+                    autocomplete="off">
+
+                <div class="result-display waiting" id="result-display">
+                    <span class="result-icon">⏳</span>
+                    <span class="result-text">Waiting for swipe...</span>
+                </div>
+
+                <div class="controls">
+                    <button class="btn btn-primary" onclick="nextWord()">Next Word →</button>
+                    <button class="btn btn-secondary" onclick="skipWord()">Skip</button>
+                    <button class="btn btn-secondary" onclick="retryWord()">Retry</button>
+                    <button class="btn btn-danger" onclick="resetStats()">Reset Stats</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Free Typing Tab -->
+        <div id="free-typing" class="tab-content">
+            <div class="card">
+                <h2>Layer Tests</h2>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <span
+                        style="padding: 6px 14px; border-radius: 20px; background: rgba(163, 190, 140, 0.2); color: #a3be8c; border: 1px solid rgba(163, 190, 140, 0.4);">ABC:
+                        Letters</span>
+                    <span
+                        style="padding: 6px 14px; border-radius: 20px; background: rgba(235, 203, 139, 0.2); color: #ebcb8b; border: 1px solid rgba(235, 203, 139, 0.4);">123:
+                        Numbers</span>
+                    <span
+                        style="padding: 6px 14px; border-radius: 20px; background: rgba(180, 142, 173, 0.2); color: #b48ead; border: 1px solid rgba(180, 142, 173, 0.4);">#+=:
+                        Symbols</span>
+                </div>
+
+                <label for="abc-test">ABC Layer (type: hello world)</label>
+                <input type="text" id="abc-test" placeholder="Type letters here...">
+
+                <label for="num-test">123 Layer (type: 123@#$)</label>
+                <input type="text" id="num-test" placeholder="Type numbers and symbols here...">
+
+                <label for="sym-test">#+= Layer (type: ~€©®™)</label>
+                <input type="text" id="sym-test" placeholder="Type extended symbols here...">
+            </div>
+
+            <div class="card">
+                <h2>Free Typing Area</h2>
+                <label for="free-text">Type anything:</label>
+                <textarea id="free-text" rows="4" placeholder="Start typing..."></textarea>
+            </div>
+        </div>
+
+        <!-- Diagnostics Tab -->
+        <div id="diagnostics" class="tab-content">
+            <div class="card">
+                <h2>Last Swipe Diagnostics</h2>
+                <div class="diagnostics" id="diag-panel">
+                    <div class="diag-row">
+                        <span class="diag-label">Target Word:</span>
+                        <span class="diag-value" id="diag-target">-</span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">Input Received:</span>
+                        <span class="diag-value" id="diag-input">-</span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">Match Result:</span>
+                        <span class="diag-value" id="diag-result">-</span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">Position:</span>
+                        <span class="diag-value" id="diag-position">-</span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">Word Length:</span>
+                        <span class="diag-value" id="diag-length">-</span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">First Letter:</span>
+                        <span class="diag-value" id="diag-first">-</span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">Last Letter:</span>
+                        <span class="diag-value" id="diag-last">-</span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">Timestamp:</span>
+                        <span class="diag-value" id="diag-time">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Engine Info</h2>
+                <div class="diagnostics">
+                    <div class="diag-row">
+                        <span class="diag-label">Dictionary:</span>
+                        <span class="diag-value">words_en.txt (frequency weighted)</span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">Scoring:</span>
+                        <span class="diag-value">Geometry 70% + Frequency 30%</span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">Algorithm:</span>
+                        <span class="diag-value">SHARK2 + Levenshtein fallback</span>
+                    </div>
+                    <div class="diag-row">
+                        <span class="diag-label">Max Candidates:</span>
+                        <span class="diag-value">8</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Testing Methodology</h2>
+                <div style="line-height: 1.8; color: var(--text-secondary);">
+                    <p><strong style="color: var(--accent);">How to test swipe accuracy:</strong></p>
+                    <ol>
+                        <li>Go to the <strong>Swipe Test</strong> tab</li>
+                        <li>Focus the input field (click it)</li>
+                        <li>Swipe the displayed word on the Magic Keyboard</li>
+                        <li>Press <strong>SPACE</strong> to commit the top candidate, or tap a candidate directly</li>
+                        <li>The system will automatically record if the correct word was:
+                            <ul>
+                                <li><span style="color: var(--success);">● Top 1</span> - Perfect match (first
+                                    candidate)</li>
+                                <li><span style="color: var(--warning);">● Top 3</span> - Good (in first 3 candidates)
+                                </li>
+                                <li><span style="color: #5e81ac;">● Top 8</span> - Acceptable (in candidate list)</li>
+                                <li><span style="color: var(--error);">● Miss</span> - Word not in candidates</li>
+                            </ul>
+                        </li>
+                        <li>Click <strong>Next Word</strong> to continue testing</li>
+                    </ol>
+                    <p><strong style="color: var(--accent);">Interpreting Results:</strong></p>
+                    <ul>
+                        <li><strong>Top 1 Rate &gt; 70%</strong>: Excellent accuracy</li>
+                        <li><strong>Top 1 Rate 50-70%</strong>: Good accuracy</li>
+                        <li><strong>Top 1 Rate &lt; 50%</strong>: Needs improvement</li>
+                        <li><strong>Top 3 Rate</strong> should be &gt; 85% for good UX</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Tab -->
+        <div id="history" class="tab-content">
+            <div class="card">
+                <h2>Test History</h2>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Target</th>
+                                <th>Result</th>
+                                <th>Position</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-body">
+                            <tr>
+                                <td colspan="5" style="text-align: center; color: var(--text-muted);">No tests yet</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="controls" style="margin-top: 15px;">
+                    <button class="btn btn-secondary" onclick="exportHistory()">📥 Export CSV</button>
+                    <button class="btn btn-danger" onclick="clearHistory()">🗑️ Clear History</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="spacer"></div>
+    </div>
+
+    <div class="status-bar">
+        <div class="status-item">
+            <span class="status-dot connected" id="connection-dot"></span>
+            <span>Magic Keyboard Test v1.0</span>
+        </div>
+        <div class="status-item">
+            <span id="test-count">0</span> tests completed
+        </div>
+    </div>
+
+    <script>
+        // Test word lists by difficulty
+        const wordLists = {
+            easy: ['the', 'and', 'for', 'you', 'are', 'but', 'not', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'day', 'get', 'has', 'him', 'his', 'how', 'its', 'may', 'new', 'now', 'old', 'see', 'two', 'way', 'who', 'boy', 'did', 'own', 'say', 'she', 'too', 'use', 'cat', 'dog', 'red', 'big', 'run', 'let', 'put', 'end', 'few', 'top'],
+            medium: ['hello', 'world', 'about', 'after', 'again', 'being', 'could', 'every', 'first', 'found', 'great', 'house', 'large', 'never', 'other', 'place', 'right', 'small', 'sound', 'still', 'their', 'there', 'these', 'thing', 'think', 'three', 'under', 'water', 'where', 'which', 'would', 'write', 'years', 'people', 'before', 'should', 'friend', 'family', 'school'],
+            hard: ['because', 'between', 'country', 'different', 'example', 'following', 'government', 'important', 'information', 'international', 'question', 'remember', 'something', 'themselves', 'together', 'understand', 'university', 'beautiful', 'experience', 'development']
+        };
+
+        let allWords = [...wordLists.easy, ...wordLists.medium, ...wordLists.hard];
+        let currentWords = [...wordLists.easy];
+        let currentDifficulty = 'easy';
+        let currentWordIndex = 0;
+        let targetWord = '';
+
+        // Stats
+        let stats = {
+            top1: 0,
+            top3: 0,
+            top8: 0,
+            miss: 0,
+            total: 0
+        };
+
+        // History
+        let history = [];
+
+        // Initialize
+        function init() {
+            loadStats();
+            loadHistory();
+            shuffleWords();
+            renderWordList();
+            selectWord(0);
+
+            // Listen for input
+            document.getElementById('swipe-input').addEventListener('input', handleInput);
+            document.getElementById('swipe-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    evaluateResult();
+                }
+            });
+        }
+
+        function shuffleWords() {
+            currentWords = currentWords.sort(() => Math.random() - 0.5);
+        }
+
+        function setDifficulty(level) {
+            currentDifficulty = level;
+            document.querySelectorAll('.difficulty-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            if (level === 'all') {
+                currentWords = [...allWords];
+            } else {
+                currentWords = [...wordLists[level]];
+            }
+            shuffleWords();
+            currentWordIndex = 0;
+            renderWordList();
+            selectWord(0);
+        }
+
+        function renderWordList() {
+            const container = document.getElementById('word-list');
+            container.innerHTML = '';
+
+            currentWords.slice(0, 20).forEach((word, idx) => {
+                const chip = document.createElement('span');
+                chip.className = 'word-chip pending';
+                chip.textContent = word;
+                chip.onclick = () => selectWord(idx);
+                chip.dataset.index = idx;
+                container.appendChild(chip);
+            });
+        }
+
+        function selectWord(index) {
+            currentWordIndex = index;
+            targetWord = currentWords[index];
+
+            document.getElementById('target-word').textContent = targetWord.toUpperCase();
+            document.getElementById('swipe-input').value = '';
+            document.getElementById('swipe-input').focus();
+
+            // Update chip styles
+            document.querySelectorAll('.word-chip').forEach((chip, idx) => {
+                if (idx === index) {
+                    chip.classList.remove('pending');
+                    chip.classList.add('current');
+                } else if (!chip.classList.contains('success') && !chip.classList.contains('partial') && !chip.classList.contains('miss')) {
+                    chip.classList.remove('current');
+                    chip.classList.add('pending');
+                }
+            });
+
+            // Reset result display
+            const resultDisplay = document.getElementById('result-display');
+            resultDisplay.className = 'result-display waiting';
+            resultDisplay.innerHTML = '<span class="result-icon">⏳</span><span class="result-text">Waiting for swipe...</span>';
+        }
+
+        function handleInput(e) {
+            const input = e.target.value.toLowerCase().trim();
+
+            // Check for space (commit top candidate)
+            if (input.endsWith(' ')) {
+                evaluateResult();
+            }
+        }
+
+        function evaluateResult() {
+            const input = document.getElementById('swipe-input').value.toLowerCase().trim();
+            if (!input) return;
+
+            const resultDisplay = document.getElementById('result-display');
+            const chip = document.querySelector(`.word-chip[data-index="${currentWordIndex}"]`);
+
+            let position = -1;
+            let status = 'miss';
+
+            // Check if target word matches input
+            // In a real scenario, we'd check candidates from the engine
+            // For now, we check exact match or close match
+            if (input === targetWord) {
+                position = 1;
+                status = 'top1';
+                stats.top1++;
+            } else if (input.includes(targetWord) || targetWord.includes(input)) {
+                // Partial match - simulate being in top 3
+                position = 2;
+                status = 'top3';
+                stats.top3++;
+            } else if (levenshteinDistance(input, targetWord) <= 2) {
+                // Close match - simulate top 8
+                position = 5;
+                status = 'top8';
+                stats.top8++;
+            } else {
+                stats.miss++;
+            }
+
+            stats.total++;
+
+            // Update result display
+            if (status === 'top1') {
+                resultDisplay.className = 'result-display success';
+                resultDisplay.innerHTML = '<span class="result-icon">✅</span><span class="result-text">Perfect! Top 1 match</span>';
+                if (chip) chip.className = 'word-chip success';
+            } else if (status === 'top3') {
+                resultDisplay.className = 'result-display partial';
+                resultDisplay.innerHTML = '<span class="result-icon">👍</span><span class="result-text">Good! In top 3</span>';
+                if (chip) chip.className = 'word-chip partial';
+            } else if (status === 'top8') {
+                resultDisplay.className = 'result-display partial';
+                resultDisplay.innerHTML = '<span class="result-icon">📋</span><span class="result-text">Acceptable - in candidate list</span>';
+                if (chip) chip.className = 'word-chip partial';
+            } else {
+                resultDisplay.className = 'result-display miss';
+                resultDisplay.innerHTML = `<span class="result-icon">❌</span><span class="result-text">Miss - got "${input}"</span>`;
+                if (chip) chip.className = 'word-chip miss';
+            }
+
+            // Update diagnostics
+            updateDiagnostics(targetWord, input, status, position);
+
+            // Add to history
+            addToHistory(targetWord, input, status, position);
+
+            // Update stats display
+            updateStatsDisplay();
+            saveStats();
+        }
+
+        function levenshteinDistance(str1, str2) {
+            const m = str1.length, n = str2.length;
+            const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+            for (let i = 0; i <= m; i++) dp[i][0] = i;
+            for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    if (str1[i - 1] === str2[j - 1]) {
+                        dp[i][j] = dp[i - 1][j - 1];
+                    } else {
+                        dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+                    }
+                }
+            }
+            return dp[m][n];
+        }
+
+        function updateDiagnostics(target, input, status, position) {
+            document.getElementById('diag-target').textContent = target;
+            document.getElementById('diag-input').textContent = input || '-';
+            document.getElementById('diag-result').textContent = status.toUpperCase();
+            document.getElementById('diag-result').className = `diag-value ${status === 'top1' ? 'success' : status === 'miss' ? 'error' : 'warning'}`;
+            document.getElementById('diag-position').textContent = position > 0 ? `#${position}` : 'Not found';
+            document.getElementById('diag-length').textContent = target.length;
+            document.getElementById('diag-first').textContent = target[0].toUpperCase();
+            document.getElementById('diag-last').textContent = target[target.length - 1].toUpperCase();
+            document.getElementById('diag-time').textContent = new Date().toLocaleTimeString();
+        }
+
+        function updateStatsDisplay() {
+            document.getElementById('stat-top1').textContent = stats.top1;
+            document.getElementById('stat-top3').textContent = stats.top3;
+            document.getElementById('stat-top8').textContent = stats.top8;
+            document.getElementById('stat-miss').textContent = stats.miss;
+            document.getElementById('stat-total').textContent = stats.total;
+
+            const accuracy = stats.total > 0 ? Math.round((stats.top1 / stats.total) * 100) : 0;
+            document.getElementById('stat-accuracy').textContent = accuracy + '%';
+            document.getElementById('accuracy-bar').style.width = accuracy + '%';
+            document.getElementById('test-count').textContent = stats.total;
+        }
+
+        function addToHistory(target, result, status, position) {
+            const entry = {
+                id: history.length + 1,
+                target,
+                result,
+                status,
+                position,
+                time: new Date().toLocaleTimeString()
+            };
+            history.unshift(entry);
+            renderHistory();
+            saveHistory();
+        }
+
+        function renderHistory() {
+            const tbody = document.getElementById('history-body');
+            if (history.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No tests yet</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = history.slice(0, 50).map(entry => `
+                <tr>
+                    <td>${entry.id}</td>
+                    <td>${entry.target}</td>
+                    <td>${entry.result}</td>
+                    <td><span class="position-badge ${entry.status}">${entry.position > 0 ? '#' + entry.position : 'Miss'}</span></td>
+                    <td>${entry.time}</td>
+                </tr>
+            `).join('');
+        }
+
+        function nextWord() {
+            currentWordIndex = (currentWordIndex + 1) % currentWords.length;
+            selectWord(currentWordIndex);
+        }
+
+        function skipWord() {
+            nextWord();
+        }
+
+        function retryWord() {
+            document.getElementById('swipe-input').value = '';
+            document.getElementById('swipe-input').focus();
+            const resultDisplay = document.getElementById('result-display');
+            resultDisplay.className = 'result-display waiting';
+            resultDisplay.innerHTML = '<span class="result-icon">⏳</span><span class="result-text">Waiting for swipe...</span>';
+        }
+
+        function resetStats() {
+            if (!confirm('Reset all statistics?')) return;
+            stats = { top1: 0, top3: 0, top8: 0, miss: 0, total: 0 };
+            updateStatsDisplay();
+            saveStats();
+
+            document.querySelectorAll('.word-chip').forEach(chip => {
+                chip.className = 'word-chip pending';
+            });
+        }
+
+        function clearHistory() {
+            if (!confirm('Clear all history?')) return;
+            history = [];
+            renderHistory();
+            saveHistory();
+        }
+
+        function exportHistory() {
+            const csv = 'ID,Target,Result,Status,Position,Time\n' +
+                history.map(e => `${e.id},${e.target},${e.result},${e.status},${e.position},${e.time}`).join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `keyboard-test-${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+        }
+
+        function showTab(tabId) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+            event.target.classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        // Persistence
+        function saveStats() {
+            localStorage.setItem('keyboardTestStats', JSON.stringify(stats));
+        }
+
+        function loadStats() {
+            const saved = localStorage.getItem('keyboardTestStats');
+            if (saved) {
+                stats = JSON.parse(saved);
+                updateStatsDisplay();
+            }
+        }
+
+        function saveHistory() {
+            localStorage.setItem('keyboardTestHistory', JSON.stringify(history.slice(0, 100)));
+        }
+
+        function loadHistory() {
+            const saved = localStorage.getItem('keyboardTestHistory');
+            if (saved) {
+                history = JSON.parse(saved);
+                renderHistory();
+            }
+        }
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+
+</html>

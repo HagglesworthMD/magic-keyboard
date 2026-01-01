@@ -69,6 +69,9 @@ Window {
     property var debugKeys: []
     property var swipeCandidates: []
     
+    // Layer state: 0=ABC, 1=123, 2=#+=
+    property int currentLayer: 0
+    
     // Swipe configuration (from settings)
     readonly property real deadzone: bridge.swipeThreshold * scaleFactor
     readonly property real timeThreshold: 40  // ms
@@ -154,12 +157,63 @@ Window {
     }
     
     // ═══════════════════════════════════════════════════════════════════
-    // KEY DATA
+    // KEY DATA - MULTI-LAYER SUPPORT
     // ═══════════════════════════════════════════════════════════════════
     
-    readonly property var row1: ["q","w","e","r","t","y","u","i","o","p"]
-    readonly property var row2: ["a","s","d","f","g","h","j","k","l"]
-    readonly property var row3: ["z","x","c","v","b","n","m"]
+    // Layer 0: ABC (QWERTY letters)
+    readonly property var abcLayer: {
+        "row1": ["q","w","e","r","t","y","u","i","o","p"],
+        "row2": ["a","s","d","f","g","h","j","k","l"],
+        "row3": ["z","x","c","v","b","n","m"],
+        "row3Right": [",", "."],
+        "layerKey": "123",
+        "nextLayer": 1
+    }
+    
+    // Layer 1: 123 (Numbers + primary symbols)
+    readonly property var numLayer: {
+        "row1": ["1","2","3","4","5","6","7","8","9","0"],
+        "row2": ["@","#","$","%","&","-","+","(",")"],
+        "row3": ["!","\"","'",":",";","/","?"],
+        "row3Right": ["_", "="],
+        "layerKey": "#+=",
+        "nextLayer": 2
+    }
+    
+    // Layer 2: #+= (Extended symbols)
+    readonly property var symLayer: {
+        "row1": ["~","`","|","•","√","π","÷","×","{","}"],
+        "row2": ["€","£","¥","^","°","=","[","]","<",">"],
+        "row3": ["\\","©","®","™","¶","§","«","»"],
+        "row3Right": ["…", "•"],
+        "layerKey": "123",
+        "nextLayer": 1
+    }
+    
+    // Current layer data accessor
+    readonly property var currentLayerData: {
+        if (currentLayer === 0) return abcLayer;
+        if (currentLayer === 1) return numLayer;
+        return symLayer;
+    }
+    
+    // Legacy aliases for backward compatibility with swipe logic
+    readonly property var row1: currentLayerData.row1
+    readonly property var row2: currentLayerData.row2
+    readonly property var row3: currentLayerData.row3
+    
+    // Layer switching functions
+    function cycleToNextLayer() {
+        currentLayer = currentLayerData.nextLayer;
+    }
+    
+    function switchToABC() {
+        currentLayer = 0;
+    }
+    
+    function switchToLayer(layerIndex) {
+        currentLayer = layerIndex;
+    }
     
     // ═══════════════════════════════════════════════════════════════════
     // FUNCTIONS
@@ -204,6 +258,22 @@ Window {
     
     function commitKey(key) {
         console.log("commitKey: code=" + key.code + " action=" + key.action);
+        
+        // Layer switching
+        if (key.code === "layer_123") {
+            currentLayer = 1;
+            return;
+        } else if (key.code === "layer_abc") {
+            currentLayer = 0;
+            return;
+        } else if (key.code === "layer_cycle") {
+            cycleToNextLayer();
+            return;
+        } else if (key.code === "globe") {
+            // Future: emoji picker
+            return;
+        }
+        
         if (key.code === "shift") {
             shiftActive = !shiftActive;
         } else if (key.code === "paste") {
@@ -661,66 +731,83 @@ Window {
             Layout.fillHeight: true
             spacing: 0  // Gaps handled by key items
             
-            // Row 1: QWERTY + Backspace
+            // Row 1: Top row (letters or numbers/symbols) + Backspace
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 0
                 
                 Repeater {
-                    model: keyboard.row1
+                    model: keyboard.currentLayerData.row1
                     KeyBtn { label: modelData; kw: 1.0 }
                 }
                 
                 KeyBtn { label: "⌫"; code: "backspace"; kw: 1.5; special: true }
             }
             
-            // Row 2: Home row + Enter
+            // Row 2: Middle row + Enter
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 0
                 
-                // Half-unit offset for stagger
-                Item { width: keyboard.gridUnit * 0.25 }
+                // Half-unit offset for stagger (ABC layer only)
+                Item { width: keyboard.currentLayer === 0 ? keyboard.gridUnit * 0.25 : 0 }
                 
                 Repeater {
-                    model: keyboard.row2
+                    model: keyboard.currentLayerData.row2
                     KeyBtn { label: modelData; kw: 1.0 }
                 }
                 
                 KeyBtn { label: "↵"; code: "enter"; kw: 1.5; special: true }
             }
             
-            // Row 3: Shift + bottom row + punctuation
+            // Row 3: Bottom letter row with shift/layer key + punctuation
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 0
                 
+                // Left side: Shift (ABC) or Layer switch (#+=)
                 KeyBtn { 
-                    label: "⇧"
-                    code: "shift"
+                    label: keyboard.currentLayer === 0 ? "⇧" : keyboard.currentLayerData.layerKey
+                    code: keyboard.currentLayer === 0 ? "shift" : "layer_cycle"
                     kw: 1.5
                     special: true
-                    isPressed: keyboard.shiftActive
+                    isPressed: keyboard.currentLayer === 0 && keyboard.shiftActive
                 }
                 
                 Repeater {
-                    model: keyboard.row3
+                    model: keyboard.currentLayerData.row3
                     KeyBtn { label: modelData; kw: 1.0 }
                 }
                 
-                KeyBtn { label: ","; code: ","; kw: 1.0 }
-                KeyBtn { label: "."; code: "."; kw: 1.0 }
+                // Right side punctuation from layer data
+                Repeater {
+                    model: keyboard.currentLayerData.row3Right
+                    KeyBtn { label: modelData; code: modelData; kw: 1.0 }
+                }
             }
             
-            // Row 4: Numbers + Arrow keys
+            // Row 4: Layer switch + Space + common punctuation
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 0
 
-                Repeater {
-                    model: ["1","2","3","4","5","6","7","8","9","0"]
-                    KeyBtn { label: modelData; code: modelData; kw: 0.85 }
+                // Layer switch key (123/ABC)
+                KeyBtn { 
+                    label: keyboard.currentLayer === 0 ? "123" : "ABC"
+                    code: keyboard.currentLayer === 0 ? "layer_123" : "layer_abc"
+                    kw: 1.2
+                    special: true
                 }
+                
+                // Globe/emoji placeholder (future)
+                KeyBtn { label: "🌐"; code: "globe"; kw: 0.8; special: true }
+                
+                // Space bar
+                KeyBtn { label: ""; code: "space"; kw: 5.0; special: true }
+                
+                // Common punctuation that stays across layers
+                KeyBtn { label: "'"; code: "'"; kw: 0.8 }
+                KeyBtn { label: "?"; code: "?"; kw: 0.8 }
                 
                 // Arrow keys
                 KeyBtn { label: "←"; code: "left"; kw: 0.9; special: true }
@@ -735,9 +822,12 @@ Window {
                 KeyBtn { label: "Tab"; code: "tab"; kw: 1.0; special: true }
                 KeyBtn { label: "Copy"; code: "copy"; kw: 1.1; action: true }
                 KeyBtn { label: "Paste"; code: "paste"; kw: 1.1; action: true }
-                KeyBtn { label: ""; code: "space"; kw: 4.5; special: true }
                 KeyBtn { label: "Cut"; code: "cut"; kw: 1.0; action: true }
                 KeyBtn { label: "Sel"; code: "selectall"; kw: 1.0; action: true }
+                
+                // Filler
+                Item { width: keyboard.gridUnit * 2.5 }
+                
                 KeyBtn { label: "↑"; code: "up"; kw: 0.8; special: true }
                 KeyBtn { label: "↓"; code: "down"; kw: 0.8; special: true }
             }

@@ -8,9 +8,10 @@
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/instance.h>
 
+#include "lexicon/Trie.h"
 #include "settings.h"
-#include "user_data.h"
 #include "shark2.h"
+#include "user_data.h"
 
 #include <atomic>
 #include <chrono>
@@ -164,6 +165,7 @@ private:
     double score;
   };
   std::vector<DictWord> dictionary_;
+  std::unique_ptr<lexicon::Trie> trie_;
   std::vector<int> buckets_[26][26];
 
   std::vector<Candidate> currentCandidates_;
@@ -172,7 +174,7 @@ private:
 
   // SHARK2 engine for gesture recognition
   shark2::Shark2Engine shark2Engine_;
-  bool useShark2_ = true;  // Enable SHARK2 algorithm
+  bool useShark2_ = true; // Enable SHARK2 algorithm
 
   // Learning context
   std::string lastCommittedWord_;

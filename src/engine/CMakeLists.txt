@@ -6,6 +6,7 @@ add_library(magickeyboard-engine MODULE
     shark2.cpp
     settings.cpp
     user_data.cpp
+    lexicon/Trie.cpp
 )
 
 target_link_libraries(magickeyboard-engine

@@ -39,6 +39,7 @@ MagicKeyboardFactory::create(fcitx::AddonManager *manager) {
 
 MagicKeyboardEngine::MagicKeyboardEngine(fcitx::Instance *instance)
     : instance_(instance) {
+  trie_ = std::make_unique<lexicon::Trie>();
   MKLOG(Info) << "Magic Keyboard engine starting";
 
   // Initialize settings and user learning data
@@ -1603,46 +1604,113 @@ void MagicKeyboardEngine::loadDictionary() {
     for (int j = 0; j < 26; ++j)
       buckets_[i][j].clear();
 
-  std::string wordRelPath = "magic-keyboard/dict/words.txt";
+  // Try new format first: words_en.txt (word freq)
+  std::string wordRelPath = "magic-keyboard/dict/words_en.txt";
   std::string foundWordPath = findDataFile(wordRelPath);
+
+  if (foundWordPath.empty()) {
+    // Fallback to legacy path if new one missing
+    wordRelPath = "magic-keyboard/dict/words.txt";
+    foundWordPath = findDataFile(wordRelPath);
+  }
 
   if (foundWordPath.empty()) {
     std::string roots;
     for (const auto &d : dataDirs())
       roots += d + (d == dataDirs().back() ? "" : ", ");
-    MKLOG(Error) << "Dictionary not found: " << wordRelPath
+    MKLOG(Error) << "Dictionary not found: words_en.txt or words.txt"
                  << " (searched in roots: [" << roots << "])";
+
+    // Create detailed fallback dictionary in memory for immediate use
+    // Using a few common words to ensure engine works
+    static const std::vector<std::pair<std::string, int>> fallbacks = {
+        {"the", 50000},  {"be", 40000},   {"to", 35000},     {"of", 30000},
+        {"and", 25000},  {"a", 20000},    {"in", 15000},     {"hello", 1000},
+        {"world", 1000}, {"magic", 1000}, {"keyboard", 1000}};
+
+    for (const auto &p : fallbacks) {
+      trie_->insert(p.first, p.second);
+
+      DictWord dw;
+      dw.word = p.first;
+      dw.freq = p.second;
+      dw.len = (int)p.first.length();
+      dw.first = p.first[0];
+      dw.last = p.first.back();
+      dictionary_.push_back(dw);
+
+      int fidx = dw.first - 'a';
+      int lidx = dw.last - 'a';
+      if (fidx >= 0 && fidx < 26 && lidx >= 0 && lidx < 26) {
+        buckets_[fidx][lidx].push_back((int)dictionary_.size() - 1);
+      }
+    }
     return;
   }
 
-  std::string wordPath = foundWordPath;
-  std::string freqPath =
-      wordPath.substr(0, wordPath.find_last_of("\\/")) + "/freq.tsv";
+  MKLOG(Info) << "Loading dictionary from: " << foundWordPath;
 
-  MKLOG(Info) << "Loading dictionary from: " << wordPath;
-
-  // Load frequencies first
-  std::unordered_map<std::string, uint32_t> freqs;
-  std::ifstream ff(freqPath);
+  std::ifstream wf(foundWordPath);
   std::string line;
-  while (std::getline(ff, line)) {
-    size_t tab = line.find('\t');
-    if (tab != std::string::npos) {
-      freqs[line.substr(0, tab)] = std::stoul(line.substr(tab + 1));
-    }
-  }
+  int loadedWords = 0;
 
-  // Load words
-  std::ifstream wf(wordPath);
   while (std::getline(wf, line)) {
     if (line.empty())
       continue;
+
+    // Parse "word freq"
+    std::string word;
+    uint32_t freq = 1;
+
+    size_t space = line.find(' ');
+    if (space != std::string::npos) {
+      word = line.substr(0, space);
+      try {
+        freq = std::stoul(line.substr(space + 1));
+      } catch (...) {
+        freq = 1;
+      }
+    } else {
+      size_t tab = line.find('\t');
+      if (tab != std::string::npos) {
+        word = line.substr(0, tab);
+        try {
+          freq = std::stoul(line.substr(tab + 1));
+        } catch (...) {
+          freq = 1;
+        }
+      } else {
+        word = line;
+      }
+    }
+
+    // Validate
+    if (word.empty())
+      continue;
+    bool valid = true;
+    for (char c : word) {
+      if (!std::isalpha(c) && c != '\'') {
+        valid = false;
+        break;
+      }
+    }
+    if (!valid)
+      continue;
+
+    // Normalize
+    for (auto &c : word)
+      c = std::tolower(c);
+
+    // Insert into Trie
+    trie_->insert(word, freq);
+
+    // Insert into vector (for candidate iteration)
     DictWord dw;
-    dw.word = line;
-    dw.freq = freqs.count(line) ? freqs[line] : 0;
-    dw.len = (int)line.length();
-    dw.first = (char)std::tolower(line[0]);
-    dw.last = (char)std::tolower(line.back());
+    dw.word = word;
+    dw.freq = freq;
+    dw.len = (int)word.length();
+    dw.first = word[0];
+    dw.last = word.back();
     dictionary_.push_back(dw);
 
     int fidx = dw.first - 'a';
@@ -1650,8 +1718,10 @@ void MagicKeyboardEngine::loadDictionary() {
     if (fidx >= 0 && fidx < 26 && lidx >= 0 && lidx < 26) {
       buckets_[fidx][lidx].push_back((int)dictionary_.size() - 1);
     }
+    loadedWords++;
   }
-  MKLOG(Info) << "Loaded " << dictionary_.size() << " words";
+
+  MKLOG(Info) << "Loaded " << loadedWords << " words into Trie and Vector";
 
   // Initialize SHARK2 engine with the same dictionary
   if (useShark2_) {
@@ -1860,14 +1930,19 @@ double MagicKeyboardEngine::scoreCandidate(const std::string &keys,
 
   // 3. Frequency component
   // Using log(freq) for scaling. Adding 1 to avoid log(0).
-  double freqScore = std::log1p(dw.freq);
+  double freqScore = std::log(dw.freq + 1);
 
-  // 4. Adaptive learning boost (unigram + bigram context)
+  // 4. Geometry Score (Approximate)
+  // Distance is bad, overlaps are good.
+  double geomScore = 1.0 * overlaps - 2.2 * dist;
+
+  // 5. Adaptive learning boost
   double learningBoost =
       UserDataManager::instance().getLearningBoost(dw.word, lastCommittedWord_);
 
-  // Final formula: score = -2.2*edit + 1.0*bigrams + 0.8*freqScore + learning
-  return -2.2 * dist + 1.0 * overlaps + 0.8 * freqScore + learningBoost;
+  // Final formula: blend geometry and frequency
+  // totalScore = geomScore * 0.7 + freqScore * 0.3 + learning
+  return geomScore * 0.7 + freqScore * 0.3 + learningBoost;
 }
 
 void MagicKeyboardEngine::recordWordCommit(const std::string &word) {
