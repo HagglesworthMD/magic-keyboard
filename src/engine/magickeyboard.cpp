@@ -240,13 +240,26 @@ void MagicKeyboardEngine::handleFocusIn(fcitx::InputContext *ic) {
     return;
   }
 
-  // CRITICAL FIX: When UI is visible, ignore focus changes to preserve typing
-  // target The UI window might trigger FocusIn events even with
-  // WindowDoesNotAcceptFocus
+  // When UI is visible, we need smarter handling:
+  // - If focus moves to a NEW valid text field → update preservedIC_ to that field
+  // - If focus moves back to same IC or UI window → ignore
   if (visibilityState_ == VisibilityState::Visible) {
-    MKLOG(Info) << "FocusIn while UI visible - ignoring to preserve typing IC "
-                << (void *)preservedIC_;
-    // Do NOT update currentIC_ or lastFocusedIc_ - keep using preservedIC_
+    // Check if this is a different IC than what we're currently targeting
+    if (ic != preservedIC_ && ic != currentIC_) {
+      // User clicked a different text field - switch to it!
+      MKLOG(Info) << "FocusIn to new IC while visible - switching target from "
+                  << (preservedIC_ ? preservedIC_->program() : "null")
+                  << " to " << program;
+      preservedIC_ = ic;
+      currentIC_ = ic;
+      lastFocusedIc_ = ic;
+      
+      // Send caret position for snap-to-caret feature on new field
+      sendCaretPosition(preservedIC_);
+    } else {
+      // Same IC or UI window bounce - ignore
+      MKLOG(Debug) << "FocusIn while UI visible - same IC, ignoring";
+    }
     return;
   }
 
