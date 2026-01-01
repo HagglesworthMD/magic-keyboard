@@ -73,8 +73,9 @@ Window {
     property int currentLayer: 0
     
     // Swipe configuration (from settings)
-    readonly property real deadzone: bridge.swipeThreshold * scaleFactor
-    readonly property real timeThreshold: 40  // ms
+    // Note: Increased thresholds to prevent trackpad tap jitter from triggering swipe
+    readonly property real deadzone: Math.max(35, bridge.swipeThreshold * scaleFactor)  // Min 35px
+    readonly property real timeThreshold: 80  // ms (increased from 40)
     readonly property real smoothingAlpha: bridge.pathSmoothing
     readonly property real resampleDist: 8 * scaleFactor
     
@@ -410,6 +411,7 @@ Window {
         }
         
         onPressed: (mouse) => {
+            console.log("onPressed: x=" + mouse.x + " y=" + mouse.y);
             keyboard.startPos = Qt.point(mouse.x, mouse.y);
             keyboard.startTime = Date.now();
             keyboard.isSwiping = false;
@@ -417,11 +419,21 @@ Window {
             keyboard.swipeCandidates = [];
             
             let key = keyboard.getKeyAt(mouse.x, mouse.y);
+            console.log("onPressed: key=" + (key ? key.code : "null"));
             keyboard.activeKey = key;
             if (keyboard.activeKey) keyboard.activeKey.isPressed = true;
             
             fadeTimer.stop();
             trailCanvas.requestPaint();
+        }
+        
+        onClicked: (mouse) => {
+            console.log("onClicked: x=" + mouse.x + " y=" + mouse.y);
+            // If we get here and have an activeKey, commit it
+            if (keyboard.activeKey && !keyboard.isSwiping) {
+                console.log("onClicked: Committing key: " + keyboard.activeKey.code);
+                keyboard.commitKey(keyboard.activeKey);
+            }
         }
         
         onReleased: (mouse) => {

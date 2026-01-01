@@ -92,7 +92,14 @@ echo ""
 # Step 5: Install the new version
 echo -e "${BOLD}[5/6] Installing new version...${NC}"
 sudo cmake --install build
-echo -e "${GREEN}✓ Installation complete${NC}"
+
+# Also install to user-local bin to avoid PATH conflicts
+# This ensures ~/.local/bin/ has the SAME binary as /usr/local/bin/
+mkdir -p ~/.local/bin
+cp build/bin/magickeyboard-ui ~/.local/bin/
+cp build/bin/magickeyboardctl ~/.local/bin/
+chmod +x ~/.local/bin/magickeyboard-ui ~/.local/bin/magickeyboardctl
+echo -e "${GREEN}✓ Installation complete (system + user-local)${NC}"
 echo ""
 
 # Step 6: Post-installation setup
@@ -108,14 +115,38 @@ if [[ -f /usr/local/share/magic-keyboard/fcitx5-env.sh ]]; then
     echo -e "${GREEN}✓ Environment script installed${NC}"
 fi
 
-# Set up systemd user service
+# Set up systemd user service - create directly with correct path
 mkdir -p ~/.config/systemd/user
-if [[ -f /usr/local/share/magic-keyboard/magickeyboard-ui.service ]]; then
-    cp /usr/local/share/magic-keyboard/magickeyboard-ui.service ~/.config/systemd/user/
-    systemctl --user daemon-reload
-    systemctl --user enable magickeyboard-ui
-    echo -e "${GREEN}✓ Systemd service enabled${NC}"
-fi
+cat > ~/.config/systemd/user/magickeyboard-ui.service << 'SERVICE_EOF'
+[Unit]
+Description=Magic Keyboard UI
+After=graphical-session.target
+PartOf=graphical-session.target
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
+[Service]
+Type=simple
+# Use ~/.local/bin to ensure we always use the user-installed binary
+ExecStart=%h/.local/bin/magickeyboard-ui
+Restart=on-failure
+RestartSec=2
+
+# SteamOS desktop session is X11 here (DISPLAY=:0, no WAYLAND_DISPLAY)
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=%t
+Environment=QT_QPA_PLATFORM=xcb
+
+# Optional: less crash-noise if something goes wrong
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical-session.target
+SERVICE_EOF
+systemctl --user daemon-reload
+systemctl --user enable magickeyboard-ui
+echo -e "${GREEN}✓ Systemd service configured${NC}"
 
 # Configure Flatpak apps
 if command -v flatpak &> /dev/null; then
